@@ -170,6 +170,11 @@ class ButtonComponent {
     return this;
   }
 
+  setCta(): this {
+    this.buttonEl.classList.add("mod-cta");
+    return this;
+  }
+
   setIcon(value: string): this {
     this.buttonEl.dataset.icon = value;
     return this;

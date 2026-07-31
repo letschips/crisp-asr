@@ -8,8 +8,6 @@ const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAzih+Socv+iNgjB4OJhlzVQRf9IrlVaLX3ZggFX0H9hc=
 -----END PUBLIC KEY-----`;
 
-// 管理员登录密码
-const ADMIN_PASSWORD = "crisp2026password"; 
 
 function base64UrlToUint8Array(base64url) {
   const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
@@ -74,7 +72,14 @@ export default {
     if (request.method === "POST" && url.pathname === "/api/issue") {
       try {
         const body = await request.json();
-        if (body.password !== ADMIN_PASSWORD) {
+        const adminPassword = env.ADMIN_PASSWORD;
+        if (!adminPassword) {
+          return new Response(JSON.stringify({ error: "服务端未配置管理员密码" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (!body.password || body.password !== adminPassword) {
           return new Response(JSON.stringify({ error: "管理员密码错误" }), {
             status: 403,
             headers: { "Content-Type": "application/json" }
@@ -268,7 +273,7 @@ export default {
         
         <div class="form-group">
             <label>管理员密码</label>
-            <input type="password" id="password" placeholder="输入管理员密码..." value="${ADMIN_PASSWORD}">
+            <input type="password" id="password" placeholder="输入管理员密码..." value="">
         </div>
 
         <div class="form-group">

@@ -3,7 +3,7 @@
 Crisp ASR is a desktop-only Obsidian plugin by **letschips** that connects
 directly to Doubao Speech Recognition.
 
-## Version 0.4.0
+## Version 0.4.1
 
 Crisp ASR keeps Doubao Speech Recognition as the dedicated transcription
 engine and adds an optional, separate AI text-processing layer.

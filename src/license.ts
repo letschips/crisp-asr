@@ -1,3 +1,5 @@
+import { requestUrl } from "obsidian";
+
 export interface LicensePayload {
   product: string;
   licenseId: string;
@@ -40,9 +42,10 @@ export async function importEd25519PublicKey(pem: string): Promise<CryptoKey> {
     .replace("-----END PUBLIC KEY-----", "")
     .replace(/\s/g, "");
   const der = base64UrlToUint8Array(pemContents);
+  const derArrayBuffer = der.buffer.slice(der.byteOffset, der.byteOffset + der.byteLength) as ArrayBuffer;
   return await window.crypto.subtle.importKey(
     "spki",
-    der.buffer,
+    derArrayBuffer,
     { name: "Ed25519" },
     true,
     ["verify"]
@@ -57,7 +60,7 @@ function getDeviceId(): string {
 }
 
 /**
- * 本地 Ed25519 解密验签 + Cloudflare 在线设备数限制校验
+ * 本地 Ed25519 解密验签 + Obsidian requestUrl 在线设备数限制校验
  */
 export async function verifyLicenseCode(
   licenseCode: string,
@@ -76,24 +79,20 @@ export async function verifyLicenseCode(
   const [payloadBase64, signatureBase64] = parts;
 
   try {
-    // 1. 本地解析 Payload JSON
     const payloadJson = new TextDecoder().decode(base64UrlToUint8Array(payloadBase64));
     const payload = JSON.parse(payloadJson) as LicensePayload;
 
-    // 2. 校验产品标识
     const validProducts = ["Crisp Suite", "Crisp ASR", "Crisp Annotations", "Crisp File Explorer", "Crisp Focus", "Crisp Reading Rail"];
     if (!validProducts.includes(payload.product)) {
       return { valid: false, reason: "授权码不属于 Crisp 系列插件" };
     }
 
-    // 3. 校验特定插件权限
     const features = Array.isArray(payload.features) ? payload.features : [];
     const hasFeaturePermission = features.includes("all") || features.includes(targetPluginId);
     if (!hasFeaturePermission) {
       return { valid: false, reason: `该授权码未包含 ${targetPluginId} 权限` };
     }
 
-    // 4. 校验到期时间
     if (payload.expiresAt) {
       const expireTime = new Date(payload.expiresAt).getTime();
       if (Number.isFinite(expireTime) && Date.now() > expireTime) {
@@ -102,26 +101,27 @@ export async function verifyLicenseCode(
       }
     }
 
-    // 5. 本地公钥解密验签
     const publicKey = await importEd25519PublicKey(CRISP_PUBLIC_KEY_PEM);
     const signature = base64UrlToUint8Array(signatureBase64);
+    const signatureArrayBuffer = signature.buffer.slice(signature.byteOffset, signature.byteOffset + signature.byteLength) as ArrayBuffer;
     const dataBytes = new TextEncoder().encode(payloadBase64);
+    const dataArrayBuffer = dataBytes.buffer.slice(dataBytes.byteOffset, dataBytes.byteOffset + dataBytes.byteLength) as ArrayBuffer;
 
     const isSignatureValid = await window.crypto.subtle.verify(
       "Ed25519",
       publicKey,
-      signature,
-      dataBytes
+      signatureArrayBuffer,
+      dataArrayBuffer
     );
 
     if (!isSignatureValid) {
       return { valid: false, reason: "授权签名无效或伪造" };
     }
 
-    // 6. Cloudflare 在线设备上线防刷校验
     try {
       const deviceId = getDeviceId();
-      const response = await fetch(WORKER_VERIFY_URL, {
+      const res = await requestUrl({
+        url: WORKER_VERIFY_URL,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -132,8 +132,8 @@ export async function verifyLicenseCode(
         })
       });
 
-      if (response.ok) {
-        const cloudResult = await response.json();
+      if (res.status === 200 && res.json) {
+        const cloudResult = res.json as { valid?: boolean; reason?: string; message?: string };
         if (cloudResult.valid === false) {
           return { valid: false, reason: cloudResult.reason || "设备数已达上限" };
         }
@@ -144,7 +144,7 @@ export async function verifyLicenseCode(
         };
       }
     } catch (netErr) {
-      // 离线环境（网络断开或断网状态），降级回退到纯离线解密结果，保证离线正常可用
+      console.debug("Crisp ASR license online check offline fallback", netErr);
     }
 
     return { valid: true, payload };

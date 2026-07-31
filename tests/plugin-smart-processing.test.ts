@@ -60,6 +60,7 @@ describe("plugin smart processing workflow", () => {
       aiApiKeySecretName: "ai-test",
       aiModel: "test-model",
     };
+    plugin.ensureLicenseActivated = async () => true;
     plugin.uiState.smartTargetPath = file.path;
     (
       plugin as unknown as {

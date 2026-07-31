@@ -135,8 +135,7 @@ describe("plugin interaction registration", () => {
       for (const listener of listeners) {
         listener();
       }
-      await Promise.resolve();
-      await Promise.resolve();
+      await plugin.refreshMicrophones();
 
       expect(plugin.uiState.microphones).toContainEqual({
         deviceId: "wireless-rx",
