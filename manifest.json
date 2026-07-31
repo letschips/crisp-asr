@@ -5,6 +5,6 @@
   "minAppVersion": "1.11.4",
   "description": "Transcribe audio with Doubao ASR, then safely polish or extract notes with your chosen AI.",
   "author": "letschips",
-  "authorUrl": "https://github.com/Hervepotato",
+  "authorUrl": "https://github.com/letschips",
   "isDesktopOnly": true
 }
