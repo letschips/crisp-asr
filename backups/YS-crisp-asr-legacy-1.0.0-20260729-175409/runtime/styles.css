@@ -1,0 +1,196 @@
+/* ==========================================================================
+   Crisp ASR - Volcengine Doubao Speech-to-Text Engine (v1.0.0)
+   Crafted by letschips (Xiaohongshu)
+   ========================================================================== */
+
+:root {
+  --crisp-asr-primary: #705df2;
+  --crisp-asr-primary-hover: #5d49e0;
+  --crisp-asr-recording: #ff3b30;
+  --crisp-asr-recording-glow: rgba(255, 59, 48, 0.4);
+  --crisp-asr-radius: 12px;
+}
+
+/* --------------------------------------------------------------------------
+ * 1. Crisp Live Streaming Floating Bar (Top Audio Strip)
+ * -------------------------------------------------------------------------- */
+.crisp-asr-live-strip {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 18px;
+  background: rgba(28, 28, 30, 0.88);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 40px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.crisp-asr-live-strip.is-recording {
+  border-color: rgba(255, 59, 48, 0.35);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 20px var(--crisp-asr-recording-glow);
+}
+
+.crisp-asr-pulse-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.crisp-asr-pulse-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background-color: var(--crisp-asr-recording);
+  box-shadow: 0 0 8px var(--crisp-asr-recording);
+  animation: crisp-asr-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes crisp-asr-pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+    box-shadow: 0 0 12px var(--crisp-asr-recording);
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+}
+
+.crisp-asr-wave-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 14px;
+}
+
+.crisp-asr-wave-bar {
+  width: 3px;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.85);
+  border-radius: 2px;
+  animation: crisp-asr-wave 1.2s ease-in-out infinite;
+}
+
+.crisp-asr-wave-bar:nth-child(1) { animation-delay: 0.0s; }
+.crisp-asr-wave-bar:nth-child(2) { animation-delay: 0.2s; }
+.crisp-asr-wave-bar:nth-child(3) { animation-delay: 0.4s; }
+.crisp-asr-wave-bar:nth-child(4) { animation-delay: 0.1s; }
+
+@keyframes crisp-asr-wave {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+
+.crisp-asr-timer {
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
+}
+
+.crisp-asr-status-text {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+}
+
+.crisp-asr-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: rgba(255, 59, 48, 0.85);
+  color: #ffffff;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.crisp-asr-stop-btn:hover {
+  background: rgba(255, 59, 48, 1);
+  transform: scale(1.04);
+}
+
+/* --------------------------------------------------------------------------
+ * 2. Settings Collapsible Card Groups (Crisp Apple Style)
+ * -------------------------------------------------------------------------- */
+.crisp-asr-setting-card {
+  margin-bottom: 1rem;
+  border-radius: var(--crisp-asr-radius);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  overflow: hidden;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.crisp-asr-setting-card:hover {
+  border-color: var(--interactive-accent);
+}
+
+.crisp-asr-setting-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.2rem;
+  background: var(--background-secondary-alt);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-normal);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.crisp-asr-setting-card__body {
+  padding: 0.5rem 1.2rem;
+}
+
+.crisp-asr-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.crisp-asr-badge.is-volc {
+  background: rgba(112, 93, 242, 0.15);
+  color: var(--crisp-asr-primary);
+  border: 1px solid rgba(112, 93, 242, 0.3);
+}
+
+.crisp-asr-badge.is-success {
+  background: rgba(52, 199, 89, 0.15);
+  color: #34c759;
+  border: 1px solid rgba(52, 199, 89, 0.3);
+}
+
+/* --------------------------------------------------------------------------
+ * 3. Callout & Editor Enhancements
+ * -------------------------------------------------------------------------- */
+.callout[data-callout="crisp-asr"] {
+  --callout-color: 112, 93, 242;
+  --callout-icon: mic;
+  border-left-color: var(--crisp-asr-primary);
+  background-color: color-mix(in srgb, var(--crisp-asr-primary) 6%, transparent);
+}

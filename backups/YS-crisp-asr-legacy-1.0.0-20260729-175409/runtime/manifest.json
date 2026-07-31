@@ -1,0 +1,10 @@
+{
+  "id": "crisp-asr",
+  "name": "Crisp ASR",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Real-time streaming dictation, audio file transcription, and Obsidian voice recording powered by Volcengine Doubao Speech Recognition by letschips.",
+  "author": "letschips",
+  "authorUrl": "https://xiaohongshu.com",
+  "isDesktopOnly": false
+}

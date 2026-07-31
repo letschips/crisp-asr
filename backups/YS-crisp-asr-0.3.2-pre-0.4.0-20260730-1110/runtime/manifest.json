@@ -1,0 +1,10 @@
+{
+  "id": "crisp-asr",
+  "name": "Crisp ASR",
+  "version": "0.3.2",
+  "minAppVersion": "1.11.4",
+  "description": "Transcribe vault audio and live speech with Doubao ASR.",
+  "author": "小红书 letschips",
+  "authorUrl": "https://xhslink.cn/m/3MwtKu4822b",
+  "isDesktopOnly": true
+}
