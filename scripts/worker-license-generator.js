@@ -5,9 +5,6 @@ const PUBLIC_KEYS = [
   `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAiz41HIDpD59SH3DjKnovUO+EEhTJXjvmiug/ev9t4ZQ=
 -----END PUBLIC KEY-----`,
-  `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAzih+Socv+iNgjB4OJhlzVQRf9IrlVaLX3ZggFX0H9hc=
------END PUBLIC KEY-----`
 ];
 
 
