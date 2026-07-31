@@ -1,9 +1,15 @@
 import crypto from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-// Crisp 5合1全家桶专用的 Ed25519 私钥
-const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIBIv8Bt1oK9PG9yioCjJ+0PxBeekGEKb+wPRyu0qI90l
------END PRIVATE KEY-----`;
+// Crisp 5合1全家桶专用 Ed25519 私钥：只从环境变量或本地私密文件读取，不硬编码
+function loadPrivateKey() {
+  if (process.env.CRISP_PRIVATE_KEY_PEM) return process.env.CRISP_PRIVATE_KEY_PEM;
+  const file = process.env.CRISP_PRIVATE_KEY_FILE || join(process.env.HOME || "", ".crisp", "crisp-license-private.pem");
+  if (existsSync(file)) return readFileSync(file, "utf8");
+  console.error(`缺少私钥：请设置 CRISP_PRIVATE_KEY_PEM 环境变量，或将私钥保存到 ${file}`);
+  process.exit(1);
+}
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -42,7 +48,7 @@ function issueLicense() {
   };
 
   const payloadBase64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = crypto.sign(null, Buffer.from(payloadBase64), PRIVATE_KEY_PEM);
+  const signature = crypto.sign(null, Buffer.from(payloadBase64), loadPrivateKey());
   const signatureBase64 = signature.toString('base64url');
 
   const licenseCode = `${payloadBase64}.${signatureBase64}`;

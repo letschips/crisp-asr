@@ -1,12 +1,14 @@
 // Crisp Suite 5合1通用手机网页发卡器 & 设备在线绑定/解密/解绑 (Cloudflare Worker 专用代码)
 
-const PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIBIv8Bt1oK9PG9yioCjJ+0PxBeekGEKb+wPRyu0qI90l
------END PRIVATE KEY-----`;
-
-const PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+// 私钥只从 Cloudflare Secret (env.PRIVATE_KEY_PEM) 注入，源码不保留私钥
+const PUBLIC_KEYS = [
+  `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAiz41HIDpD59SH3DjKnovUO+EEhTJXjvmiug/ev9t4ZQ=
+-----END PUBLIC KEY-----`,
+  `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAzih+Socv+iNgjB4OJhlzVQRf9IrlVaLX3ZggFX0H9hc=
------END PUBLIC KEY-----`;
+-----END PUBLIC KEY-----`
+];
 
 
 function base64UrlToUint8Array(base64url) {
@@ -108,7 +110,14 @@ export default {
         const payloadJson = JSON.stringify(payload);
         const payloadBase64 = uint8ArrayToBase64Url(new TextEncoder().encode(payloadJson));
 
-        const privateKey = await importPrivateKey(PRIVATE_KEY_PEM);
+        const privateKeyPem = env.PRIVATE_KEY_PEM;
+        if (!privateKeyPem) {
+          return new Response(JSON.stringify({ error: "服务端未配置签发私钥 (PRIVATE_KEY_PEM)" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        const privateKey = await importPrivateKey(privateKeyPem);
         const signatureBuffer = await crypto.subtle.sign(
           "Ed25519",
           privateKey,
@@ -163,14 +172,20 @@ export default {
         const payloadJson = new TextDecoder().decode(base64UrlToUint8Array(payloadBase64));
         const payload = JSON.parse(payloadJson);
 
-        // 服务器端 Ed25519 验签
-        const publicKey = await importPublicKey(PUBLIC_KEY_PEM);
-        const isSignatureValid = await crypto.subtle.verify(
-          "Ed25519",
-          publicKey,
-          base64UrlToUint8Array(signatureBase64),
-          new TextEncoder().encode(payloadBase64)
-        );
+        // 服务器端 Ed25519 验签（新旧公钥过渡期双校验）
+        let isSignatureValid = false;
+        for (const pem of PUBLIC_KEYS) {
+          const publicKey = await importPublicKey(pem);
+          if (await crypto.subtle.verify(
+            "Ed25519",
+            publicKey,
+            base64UrlToUint8Array(signatureBase64),
+            new TextEncoder().encode(payloadBase64)
+          )) {
+            isSignatureValid = true;
+            break;
+          }
+        }
 
         if (!isSignatureValid) {
           return new Response(JSON.stringify({ valid: false, reason: "授权签名无效或被修改" }), {
