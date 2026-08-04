@@ -61,6 +61,79 @@ async function importPublicKey(pem) {
   );
 }
 
+// -----------------------------------------------------------------------------
+// 管理辅助函数：管理员鉴权、licenseId 解析、KV 台账读写
+// -----------------------------------------------------------------------------
+function requireAdmin(body, env) {
+  const adminPassword = env.ADMIN_PASSWORD;
+  if (!adminPassword) {
+    return new Response(JSON.stringify({ error: "服务端未配置管理员密码" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+  if (!body.password || body.password !== adminPassword) {
+    return new Response(JSON.stringify({ error: "管理员密码错误" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+  return null;
+}
+
+function parseLicenseIdFromCode(licenseCode) {
+  const trimmed = (licenseCode || "").trim();
+  const parts = trimmed.split(".");
+  if (parts.length !== 2) return null;
+  try {
+    const payload = JSON.parse(
+      new TextDecoder().decode(base64UrlToUint8Array(parts[0]))
+    );
+    return typeof payload.licenseId === "string" && payload.licenseId
+      ? payload.licenseId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readIssuedIndex(env) {
+  if (!env.LICENSE_KV) return [];
+  const raw = await env.LICENSE_KV.get("issued_index");
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+async function appendIssuedIndex(env, licenseId) {
+  if (!env.LICENSE_KV) return;
+  const index = await readIssuedIndex(env);
+  if (!index.includes(licenseId)) {
+    index.push(licenseId);
+    await env.LICENSE_KV.put("issued_index", JSON.stringify(index));
+  }
+}
+
+async function getIssuedRecord(env, licenseId) {
+  if (!env.LICENSE_KV) return null;
+  const raw = await env.LICENSE_KV.get(`issued:${licenseId}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -124,8 +197,29 @@ export default {
         const signatureBase64 = uint8ArrayToBase64Url(new Uint8Array(signatureBuffer));
         const licenseCode = `${payloadBase64}.${signatureBase64}`;
 
+        // 发卡台账：记录在 KV，供后续吊销与导出
+        const record = {
+          licenseId: payload.licenseId,
+          licenseCode: licenseCode,
+          userName: name,
+          product: payload.product,
+          featureType: featureType,
+          days: days,
+          maxDevices: maxDevices,
+          issuedAt: issueDate.toISOString(),
+          expiresAt: expireDate.toISOString(),
+          revoked: false,
+          revokedAt: null,
+          revokeReason: null
+        };
+        if (env.LICENSE_KV) {
+          await env.LICENSE_KV.put(`issued:${payload.licenseId}`, JSON.stringify(record));
+          await appendIssuedIndex(env, payload.licenseId);
+        }
+
         return new Response(JSON.stringify({
           success: true,
+          licenseId: payload.licenseId,
           userName: name,
           expiresAt: expireDate.toISOString().split("T")[0],
           days: days,
@@ -135,6 +229,165 @@ export default {
         }), {
           headers: { "Content-Type": "application/json" }
         });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // 1.5 管理员吊销 / 恢复 / 台账导出 API
+    // -------------------------------------------------------------------------
+    if (
+      request.method === "POST" &&
+      (url.pathname === "/api/revoke" || url.pathname === "/api/unrevoke")
+    ) {
+      try {
+        const body = await request.json();
+        const adminError = requireAdmin(body, env);
+        if (adminError) return adminError;
+
+        const licenseId =
+          parseLicenseIdFromCode(body.licenseCode) ||
+          (typeof body.licenseId === "string" ? body.licenseId.trim() : "");
+        if (!licenseId) {
+          return new Response(
+            JSON.stringify({ error: "缺少有效的 licenseId 或卡密" }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        const revoke = url.pathname === "/api/revoke";
+        const record = await getIssuedRecord(env, licenseId);
+
+        if (env.LICENSE_KV) {
+          if (revoke) {
+            const revokedAt = new Date().toISOString();
+            const reason = (body.reason || "").trim() || "管理员吊销";
+            await env.LICENSE_KV.put(
+              `revoked:${licenseId}`,
+              JSON.stringify({ revokedAt, reason })
+            );
+            if (record) {
+              record.revoked = true;
+              record.revokedAt = revokedAt;
+              record.revokeReason = reason;
+              await env.LICENSE_KV.put(
+                `issued:${licenseId}`,
+                JSON.stringify(record)
+              );
+            }
+          } else {
+            await env.LICENSE_KV.delete(`revoked:${licenseId}`);
+            if (record) {
+              record.revoked = false;
+              record.revokedAt = null;
+              record.revokeReason = null;
+              await env.LICENSE_KV.put(
+                `issued:${licenseId}`,
+                JSON.stringify(record)
+              );
+            }
+          }
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            action: revoke ? "revoke" : "unrevoke",
+            licenseId,
+            userName: record?.userName || null,
+            revoked: revoke,
+            message: revoke
+              ? "该授权已吊销，相关设备下次联网验证将被拒绝"
+              : "已恢复该授权"
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        );
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/list-issued") {
+      try {
+        const body = await request.json();
+        const adminError = requireAdmin(body, env);
+        if (adminError) return adminError;
+
+        const index = await readIssuedIndex(env);
+        const records = [];
+        for (const licenseId of index) {
+          const record = await getIssuedRecord(env, licenseId);
+          if (!record) continue;
+          let revoked = !!record.revoked;
+          let revokedAt = record.revokedAt || null;
+          if (env.LICENSE_KV) {
+            const revokedRaw = await env.LICENSE_KV.get(`revoked:${licenseId}`);
+            if (revokedRaw) {
+              try {
+                const r = JSON.parse(revokedRaw);
+                revoked = true;
+                revokedAt = r.revokedAt || revokedAt;
+              } catch {}
+            }
+          }
+          records.push({ ...record, revoked, revokedAt });
+        }
+        records.sort((a, b) =>
+          String(b.issuedAt || "").localeCompare(String(a.issuedAt || ""))
+        );
+
+        const wantCsv = new URL(request.url).searchParams.get("format") === "csv";
+        if (wantCsv) {
+          const header = [
+            "licenseId",
+            "userName",
+            "product",
+            "featureType",
+            "days",
+            "maxDevices",
+            "issuedAt",
+            "expiresAt",
+            "revoked",
+            "licenseCode"
+          ];
+          const lines = [header.join(",")];
+          for (const r of records) {
+            lines.push(
+              [
+                r.licenseId,
+                r.userName,
+                r.product,
+                r.featureType,
+                r.days,
+                r.maxDevices,
+                r.issuedAt,
+                r.expiresAt,
+                r.revoked ? "是" : "否",
+                r.licenseCode
+              ]
+                .map(csvEscape)
+                .join(",")
+            );
+          }
+          return new Response(lines.join("\n"), {
+            headers: {
+              "Content-Type": "text/csv; charset=utf-8",
+              "Content-Disposition": `attachment; filename="crisp-issued-${new Date().toISOString().split("T")[0]}.csv"`
+            }
+          });
+        }
+
+        return new Response(
+          JSON.stringify({ success: true, count: records.length, records }),
+          { headers: { "Content-Type": "application/json" } }
+        );
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), {
           status: 500,
@@ -197,6 +450,17 @@ export default {
             status: 403,
             headers: { "Content-Type": "application/json" }
           });
+        }
+
+        // 吊销检查：被管理员吊销的授权直接拒绝
+        if (env.LICENSE_KV) {
+          const revokedRaw = await env.LICENSE_KV.get(`revoked:${payload.licenseId}`);
+          if (revokedRaw) {
+            return new Response(JSON.stringify({
+              valid: false,
+              reason: "该授权已被吊销，如有疑问请联系卖家"
+            }), { status: 403, headers: { "Content-Type": "application/json" } });
+          }
         }
 
         // 检查 KV 数据库约束（如果用户绑定了 Cloudflare KV）
@@ -322,6 +586,7 @@ export default {
                 <option value="730">2 年 (730天)</option>
                 <option value="36500">永久 (100年)</option>
                 <option value="30">1 个月试用 (30天)</option>
+                <option value="1">1 天测试版 (24小时)</option>
             </select>
         </div>
 
@@ -331,6 +596,36 @@ export default {
             <div class="result-info" id="resultInfo"></div>
             <textarea id="licenseCodeText" readonly></textarea>
             <button class="btn-copy" onclick="copyCode()">📋 复制卡密发送给买家</button>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+        <h1 style="font-size:18px;">⚙️ 管理操作</h1>
+        <p class="subtitle">吊销违规授权 / 恢复误吊销 / 导出发卡台账</p>
+
+        <div class="form-group">
+            <label>管理员密码</label>
+            <input type="password" id="adminPassword" placeholder="输入管理员密码..." value="">
+        </div>
+
+        <div class="form-group">
+            <label>卡密 / licenseId</label>
+            <input type="text" id="revokeCode" placeholder="粘贴要处理的卡密或 licenseId">
+        </div>
+
+        <div style="display:flex; gap:8px;">
+            <button class="btn-submit" style="background:#ff3b30;" onclick="revokeLicense(true)">吊销激活</button>
+            <button class="btn-submit" style="background:#34c759;" onclick="revokeLicense(false)">恢复激活</button>
+        </div>
+
+        <div style="margin-top:12px;">
+            <button class="btn-submit" style="background:#5856d6;" onclick="exportLedger()">导出发卡台账 (CSV)</button>
+        </div>
+
+        <div class="result-box" id="adminResultBox">
+            <div class="result-info" id="adminResultInfo"></div>
+            <textarea id="adminOutput" readonly></textarea>
+            <button class="btn-copy" onclick="copyAdminOutput()">📋 复制</button>
         </div>
     </div>
 
@@ -362,11 +657,58 @@ export default {
             document.getElementById('resultBox').classList.add('active');
         }
 
+        async function revokeLicense(revoke) {
+            const password = document.getElementById('adminPassword').value;
+            const licenseCode = document.getElementById('revokeCode').value.trim();
+            if (!password) { alert('请输入管理员密码'); return; }
+            if (!licenseCode) { alert('请输入卡密或 licenseId'); return; }
+            const res = await fetch(revoke ? '/api/revoke' : '/api/unrevoke', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password, licenseCode })
+            });
+            const data = await res.json();
+            const box = document.getElementById('adminResultBox');
+            box.classList.add('active');
+            document.getElementById('adminResultInfo').innerText =
+                (res.ok && data.success)
+                    ? (revoke ? '✅ 已吊销：' : '✅ 已恢复：') + (data.userName || data.licenseId)
+                    : '❌ ' + (data.error || '操作失败');
+            document.getElementById('adminOutput').value = JSON.stringify(data, null, 2);
+        }
+
+        async function exportLedger() {
+            const password = document.getElementById('adminPassword').value;
+            if (!password) { alert('请输入管理员密码'); return; }
+            const res = await fetch('/api/list-issued?format=csv', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            const text = await res.text();
+            const box = document.getElementById('adminResultBox');
+            box.classList.add('active');
+            if (!res.ok) {
+                document.getElementById('adminResultInfo').innerText = '❌ 导出失败';
+                document.getElementById('adminOutput').value = text;
+                return;
+            }
+            document.getElementById('adminResultInfo').innerText = '✅ 台账已生成，复制或保存为 CSV 文件';
+            document.getElementById('adminOutput').value = text;
+        }
+
         function copyCode() {
             const text = document.getElementById('licenseCodeText');
             text.select();
             document.execCommand('copy');
             alert('🎉 卡密已成功复制到剪贴板！');
+        }
+
+        function copyAdminOutput() {
+            const text = document.getElementById('adminOutput');
+            text.select();
+            document.execCommand('copy');
+            alert('已复制！');
         }
     </script>
 </body>

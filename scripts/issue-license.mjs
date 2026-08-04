@@ -26,6 +26,8 @@ function parseArgs() {
       options.days = parseInt(arg.split('=')[1], 10) || options.days;
     } else if (arg.startsWith('--features=')) {
       options.features = arg.split('=')[1].split(',') || options.features;
+    } else if (arg === '--trial') {
+      options.days = 1; // 1 天测试版
     }
   }
   return options;
