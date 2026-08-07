@@ -9,6 +9,10 @@ import type CrispAsrPlugin from "./main";
 import { renderAboutCard } from "./settings-about";
 import type { AiProvider } from "./settings";
 import { verifyLicenseCode } from "./license";
+import shortcutQrCode from "./assets/shortcut-qr.png";
+
+const CRISP_SHORTCUT_URL =
+  "https://www.icloud.com/shortcuts/b5c18553917b4f96bb302f88ccb2f0d4";
 
 function createSettingGroup(
   container: HTMLElement,
@@ -373,14 +377,50 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     );
 
     new Setting(workflow)
-      .setName("自动转写 Obsidian 录音")
-      .setDesc("检测到新的 Recording 音频附件后自动提交。")
+      .setName("自动转写新录音")
+      .setDesc("新的音频文件落入 Obsidian 后自动加入转写队列。")
       .addToggle((toggle) => toggle
         .setValue(this.plugin.settings.autoTranscribeRecordings)
         .onChange(async (value) => {
           this.plugin.settings.autoTranscribeRecordings = value;
           await this.plugin.saveSettings();
         }));
+
+    new Setting(workflow)
+      .setName("自动转写范围")
+      .setDesc("选择哪些新音频文件会自动转写。")
+      .addDropdown((dropdown) => dropdown
+        .addOption("recording", "仅 Obsidian 录音机命名")
+        .addOption("folder", "指定文件夹")
+        .addOption("any", "任意音频文件")
+        .setValue(this.plugin.settings.autoTranscribeScope)
+        .onChange(async (value) => {
+          this.plugin.settings.autoTranscribeScope =
+            value === "folder" || value === "any" ? value : "recording";
+          await this.plugin.saveSettings();
+          updateFolderVisibility();
+        }));
+
+    const folderSetting = new Setting(workflow)
+      .setName("监听文件夹")
+      .setDesc("范围选择「指定文件夹」时生效；留空则不会自动转写。")
+      .addText((text) => text
+        .setPlaceholder("录音")
+        .setValue(this.plugin.settings.autoTranscribeFolder)
+        .onChange(async (value) => {
+          this.plugin.settings.autoTranscribeFolder = value
+            .replace(/^\/+|\/+$/g, "")
+            .trim();
+          await this.plugin.saveSettings();
+        }));
+
+    const updateFolderVisibility = (): void => {
+      folderSetting.settingEl.classList.toggle(
+        "is-hidden",
+        this.plugin.settings.autoTranscribeScope !== "folder",
+      );
+    };
+    updateFolderVisibility();
 
     new Setting(workflow)
       .setName("输出方式")
@@ -407,19 +447,23 @@ export class CrispAsrSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    new Setting(workflow)
-      .setName("快捷指令 URL")
+    const shortcutSetting = new Setting(workflow)
+      .setName("获取 iPhone 快捷指令")
       .setDesc(
-        "使用 obsidian://crisp-asr?mode=toggle；mode 也支持 open、start、stop。",
-      )
-      .addButton((button) => button
-        .setButtonText("复制 URL")
-        .onClick(async () => {
-          const vaultName = encodeURIComponent(this.app.vault.getName());
-          const url = `obsidian://crisp-asr?vault=${vaultName}&action=record&mode=toggle`;
-          await navigator.clipboard.writeText(url);
-          new Notice("✅ 已复制快捷指令 URL 到剪贴板");
-        }));
+        "用 iPhone 相机扫描二维码（或点击二维码打开链接）即可添加「Crisp 录音」快捷指令。添加后把「存储文件」位置改成你自己的 Obsidian 库（iCloud Drive > Obsidian > 你的库 > 录音），详见插件文档。",
+      );
+    const shortcutLink = shortcutSetting.controlEl.createEl("a", {
+      href: CRISP_SHORTCUT_URL,
+      attr: { target: "_blank", rel: "noopener" },
+    });
+    shortcutLink.createEl("img", {
+      attr: {
+        src: shortcutQrCode,
+        alt: "Crisp 录音快捷指令二维码",
+        width: "112",
+        height: "112",
+      },
+    });
 
     const notice = containerEl.createDiv({ cls: "crisp-asr-privacy" });
     notice.createEl("strong", { text: "数据边界" });

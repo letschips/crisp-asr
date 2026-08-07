@@ -7,6 +7,8 @@ export type AiProvider =
 
 export type AiOutputMode = "same-note" | "new-note";
 
+export type AutoTranscribeScope = "recording" | "folder" | "any";
+
 export type FileJobStatus =
   | "queued"
   | "preparing"
@@ -37,6 +39,8 @@ export interface CrispAsrSettings {
   aiOutputMode: AiOutputMode;
   customPrompt: string;
   autoTranscribeRecordings: boolean;
+  autoTranscribeScope: AutoTranscribeScope;
+  autoTranscribeFolder: string;
   outputFolder: string;
   outputMode: "sidecar" | "current-note";
   liveResourceId: string;
@@ -57,6 +61,8 @@ export const DEFAULT_SETTINGS: CrispAsrSettings = {
   aiOutputMode: "same-note",
   customPrompt: "",
   autoTranscribeRecordings: false,
+  autoTranscribeScope: "recording",
+  autoTranscribeFolder: "",
   outputFolder: "Crisp ASR",
   outputMode: "sidecar",
   liveResourceId: "volc.seedasr.sauc.duration",
@@ -193,6 +199,16 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
       : "same-note",
     customPrompt: cleanText(candidate.customPrompt),
     autoTranscribeRecordings: candidate.autoTranscribeRecordings === true,
+    autoTranscribeScope: candidate.autoTranscribeScope === "folder"
+      || candidate.autoTranscribeScope === "any"
+      ? candidate.autoTranscribeScope
+      : "recording",
+    autoTranscribeFolder:
+      typeof candidate.autoTranscribeFolder === "string"
+        ? candidate.autoTranscribeFolder
+          .trim()
+          .replace(/^\/+|\/+$/g, "")
+        : DEFAULT_SETTINGS.autoTranscribeFolder,
     outputFolder: cleanFolder(
       candidate.outputFolder,
       DEFAULT_SETTINGS.outputFolder,

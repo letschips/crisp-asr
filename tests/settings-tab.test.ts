@@ -31,7 +31,12 @@ function installObsidianElementHelpers(): void {
   prototype.createEl = function createEl(
     this: HTMLElement,
     tag: string,
-    options?: { text?: string; cls?: string },
+    options?: {
+      text?: string;
+      cls?: string;
+      href?: string;
+      attr?: Record<string, string>;
+    },
   ): HTMLElement {
     const element = this.ownerDocument.createElement(tag);
     if (options?.text) {
@@ -39,6 +44,14 @@ function installObsidianElementHelpers(): void {
     }
     if (options?.cls) {
       element.className = options.cls;
+    }
+    if (options?.href) {
+      element.setAttribute("href", options.href);
+    }
+    if (options?.attr) {
+      for (const [key, value] of Object.entries(options.attr)) {
+        element.setAttribute(key, String(value));
+      }
     }
     this.append(element);
     return element;
@@ -60,6 +73,8 @@ function plugin(): Record<string, unknown> {
       saveLiveAudio: false,
       liveAudioFolder: "Crisp ASR/Audio",
       autoTranscribeRecordings: false,
+      autoTranscribeScope: "recording",
+      autoTranscribeFolder: "",
       outputMode: "sidecar",
       outputFolder: "Crisp ASR",
     },
@@ -121,5 +136,23 @@ describe("AI text processing settings", () => {
     expect(
       baseUrlSetting?.querySelector<HTMLInputElement>("input")?.value,
     ).toBe("https://llm.example.com/v1");
+  });
+
+  it("shows the iPhone shortcut QR download entry", () => {
+    const tab = new CrispAsrSettingTab({} as never, plugin() as never);
+
+    tab.display();
+
+    const qrSetting = Array.from(
+      tab.containerEl.querySelectorAll<HTMLElement>(".setting-item"),
+    ).find((element) =>
+      element.querySelector(".setting-item-name")?.textContent
+        === "获取 iPhone 快捷指令"
+    );
+    expect(qrSetting).toBeDefined();
+    expect(qrSetting?.querySelector("a")?.getAttribute("href")).toBe(
+      "https://www.icloud.com/shortcuts/b5c18553917b4f96bb302f88ccb2f0d4",
+    );
+    expect(qrSetting?.querySelector("img")).not.toBeNull();
   });
 });

@@ -416,6 +416,15 @@ export class CrispAsrView extends ItemView {
       ? `${state.jobs.length} 项`
       : "暂无";
     jobsMeta.append(jobsCount);
+    const scanButton = document.createElement("button");
+    scanButton.type = "button";
+    scanButton.className = "crisp-asr-jobs__scan clickable-icon";
+    scanButton.textContent = "扫描录音";
+    scanButton.ariaLabel = "扫描未转写录音";
+    scanButton.addEventListener("click", () => {
+      void this.plugin.scanUntranscribedRecordings();
+    });
+    jobsMeta.append(scanButton);
     if (state.jobs.length > 5) {
       const toggle = document.createElement("button");
       toggle.type = "button";

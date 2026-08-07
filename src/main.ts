@@ -39,7 +39,7 @@ import { transcribeFlash } from "./doubao-service";
 import {
   buildSidecarPath,
   findAudioLinkNearCursor,
-  isObsidianRecordingPath,
+  matchesAutoTranscribeScope,
   resolveProtocolAction,
 } from "./file-routing";
 import { runConnectionProbe } from "./flash-client";
@@ -69,6 +69,7 @@ import {
   upsertSmartResult,
 } from "./smart-note";
 import { TranscriptionQueue } from "./transcription-queue";
+import { UntranscribedAudioModal } from "./untranscribed-modal";
 import {
   extractTranscriptResult,
   renderLiveTranscriptBlock,
@@ -109,6 +110,21 @@ interface LiveSession {
   startedAt: string;
   startedAtMs: number;
   logId?: string;
+}
+
+export function findUntranscribedAudio(
+  files: readonly { path: string }[],
+  processedPaths: readonly string[],
+  activeJobPaths: readonly string[],
+): string[] {
+  const processed = new Set(processedPaths);
+  const active = new Set(activeJobPaths);
+  return files
+    .filter((file) => isAudioPath(file.path))
+    .filter((file) => !processed.has(file.path))
+    .filter((file) => !active.has(file.path))
+    .map((file) => file.path)
+    .sort((left, right) => left.localeCompare(right));
 }
 
 export default class CrispAsrPlugin extends Plugin {
@@ -236,6 +252,11 @@ export default class CrispAsrPlugin extends Plugin {
         }
         return available;
       },
+    });
+    this.addCommand({
+      id: "scan-untranscribed-recordings",
+      name: "扫描未转写录音并转写",
+      callback: () => void this.scanUntranscribedRecordings(),
     });
     this.addCommand({
       id: "transcribe-audio-near-cursor",
@@ -630,6 +651,55 @@ export default class CrispAsrPlugin extends Plugin {
     new Notice(`Crisp ASR：${file.name} 已加入转写队列`);
   }
 
+  async scanUntranscribedRecordings(): Promise<void> {
+    if (!(await this.ensureLicenseActivated())) return;
+    if (!this.getApiKey()) {
+      this.showMissingKey();
+      return;
+    }
+    await this.openView();
+    const activeJobPaths = (this.fileQueue?.jobs() ?? [])
+      .filter((job) => job.status !== "failed")
+      .map((job) => job.sourcePath);
+    const candidates = findUntranscribedAudio(
+      this.app.vault.getFiles(),
+      this.settings.processedAudioPaths,
+      activeJobPaths,
+    );
+    if (candidates.length === 0) {
+      new Notice("Crisp ASR：没有找到未转写的录音文件");
+      return;
+    }
+    new UntranscribedAudioModal(
+      this.app,
+      candidates,
+      (paths) => void this.enqueueUntranscribed(paths),
+    ).open();
+  }
+
+  private async enqueueUntranscribed(paths: readonly string[]): Promise<void> {
+    let added = 0;
+    let skipped = 0;
+    for (const path of paths) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) {
+        continue;
+      }
+      const job = await this.fileQueue?.enqueue(file.path);
+      if (job) {
+        added += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+    await this.fileQueue?.start();
+    new Notice(
+      skipped > 0
+        ? `Crisp ASR：已加入 ${added} 个录音（${skipped} 个已在队列中）`
+        : `Crisp ASR：已加入 ${added} 个录音转写队列`,
+    );
+  }
+
   async retryFileJob(id: string): Promise<void> {
     if (!this.getApiKey()) {
       this.showMissingKey();
@@ -667,7 +737,7 @@ export default class CrispAsrPlugin extends Plugin {
     }
     const source = this.app.vault.getAbstractFileByPath(job.sourcePath);
     if (!(source instanceof TFile) || !isAudioPath(source.path)) {
-      throw new AsrServiceError(`找不到音频文件：${job.sourcePath}`, false);
+      throw new AsrServiceError(`找不到音频文件：${job.sourcePath}`, true);
     }
     const targetValue = job.targetPath
       ? this.app.vault.getAbstractFileByPath(job.targetPath)
@@ -680,7 +750,7 @@ export default class CrispAsrPlugin extends Plugin {
         ? await decodeAudioToPcmWav(binary, window)
         : binary;
     } catch (error) {
-      throw toAsrServiceError(error, false);
+      throw toAsrServiceError(error, true);
     }
     if (audio.byteLength > MAX_AUDIO_BYTES) {
       throw new AsrServiceError(
@@ -1087,7 +1157,12 @@ export default class CrispAsrPlugin extends Plugin {
     if (
       !this.settings.autoTranscribeRecordings
       || !(file instanceof TFile)
-      || !isObsidianRecordingPath(file.path)
+      || !isAudioPath(file.path)
+      || !matchesAutoTranscribeScope(
+        file.path,
+        this.settings.autoTranscribeScope,
+        this.settings.autoTranscribeFolder,
+      )
       || this.settings.processedAudioPaths.includes(file.path)
     ) {
       return;

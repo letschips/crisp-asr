@@ -15,6 +15,8 @@ describe("settings normalization", () => {
     expect(DEFAULT_SETTINGS.aiOutputMode).toBe("same-note");
     expect(DEFAULT_SETTINGS.customPrompt).toBe("");
     expect(DEFAULT_SETTINGS.autoTranscribeRecordings).toBe(false);
+    expect(DEFAULT_SETTINGS.autoTranscribeScope).toBe("recording");
+    expect(DEFAULT_SETTINGS.autoTranscribeFolder).toBe("");
     expect(DEFAULT_SETTINGS.microphoneDeviceId).toBe("default");
     expect(DEFAULT_SETTINGS.saveLiveAudio).toBe(false);
     expect(DEFAULT_SETTINGS.liveAudioFolder).toBe("Crisp ASR/Audio");
@@ -29,11 +31,15 @@ describe("settings normalization", () => {
       outputMode: "current-note",
       liveResourceId: "",
       autoTranscribeRecordings: true,
+      autoTranscribeScope: "folder",
+      autoTranscribeFolder: " /录音/ ",
       processedAudioPaths: [...history, "", 42],
     });
     expect(settings.apiKeySecretName).toBe("doubao");
     expect(settings.outputFolder).toBe("Crisp ASR");
     expect(settings.outputMode).toBe("current-note");
+    expect(settings.autoTranscribeScope).toBe("folder");
+    expect(settings.autoTranscribeFolder).toBe("录音");
     expect(settings.liveResourceId).toBe(
       "volc.seedasr.sauc.duration",
     );
@@ -98,11 +104,15 @@ describe("settings normalization", () => {
   it("falls back from unknown input values and blank device ids", () => {
     const settings = normalizeSettings({
       liveInputMode: "camera",
+      autoTranscribeScope: "anywhere",
+      autoTranscribeFolder: 42,
       microphoneDeviceId: " ",
       liveAudioFolder: "/",
     });
 
     expect("liveInputMode" in settings).toBe(false);
+    expect(settings.autoTranscribeScope).toBe("recording");
+    expect(settings.autoTranscribeFolder).toBe("");
     expect(settings.microphoneDeviceId).toBe("default");
     expect(settings.liveAudioFolder).toBe("Crisp ASR/Audio");
   });

@@ -3,6 +3,36 @@
 Crisp ASR is a desktop-only Obsidian plugin by **letschips** that connects
 directly to Doubao Speech Recognition.
 
+## Version 0.4.14
+
+- 设置 → 转写工作流 新增「获取 iPhone 快捷指令」二维码入口：扫码即可把「Crisp 录音」快捷指令添加到 iPhone，替代原来的 obsidian:// 深链接复制按钮。
+- 新增买家适配文档 [docs/iphone-shortcut-setup.md](docs/iphone-shortcut-setup.md)，说明如何把快捷指令的保存位置改成自己的 Obsidian 库。
+
+## Version 0.4.13
+
+- 「扫描未转写录音」：面板任务区新增扫描按钮，命令面板可搜「扫描未转写录音」；扫描全库音频，排除已转写与队列中的文件，弹出多选弹窗勾选批量入队。历史漏转/失败文件可一键捞回。
+- 自动转写范围三档：仅 Obsidian 录音机命名（默认）/ 指定文件夹 / 任意音频文件。配合 iPhone 快捷指令或语音备忘录同步，可实现一键录音自动转写。
+- 文件读取失败自动重试：iCloud 大文件同步未完成时队列会短退避重试，不再一次失败就卡死。
+
+## iPhone 一键录音（快捷指令）
+
+仓库 `shortcuts/` 目录提供已签名的 `Crisp 录音` 快捷指令：iPhone 上点一下开始录音，再点一下停止，文件自动进入 Obsidian 库，桌面端插件自动转写。
+
+买家三步设置：
+
+1. **导入快捷指令**：打开签名文件 → 添加。若系统提示不受信任，先在 系统设置 → 快捷指令 → 打开「允许不受信任的快捷指令」。
+2. **设置保存位置（必须）**：快捷指令 → 「存储文件」→ 位置选 `iCloud Drive > Obsidian > 你的库 > 录音`。文件夹引用绑定账号，每个用户都需要选一次；库根没有 `录音` 文件夹就先建一个。
+3. **插件设置**：设置 → 转写工作流 → 打开「自动转写新录音」→ 范围选「指定文件夹」→ 监听文件夹填 `录音`。
+
+详细适配步骤（改保存位置、常见报错处理）见
+[docs/iphone-shortcut-setup.md](docs/iphone-shortcut-setup.md)。
+
+要求与说明：
+
+- 手机与电脑需能同步同一个库（推荐 iCloud 同步；Obsidian Sync、Dropbox 等也可，前提是 iPhone 快捷指令的文件夹选择器能直接选到库文件夹，且 Mac 能看到同步结果）。纯 Mac 使用则不需要任何同步。
+- 文件名不限（「指定文件夹」范围下任意文件名都会自动转写）。
+- Mac 上录制输出为 `.wav`，iPhone 为 `.m4a`，插件均支持并会自动转码。
+
 ## Version 0.4.12
 
 - 右侧面板布局打磨：声音来源移除后，麦克风选择改为全宽单列，统一卡片内边距与按钮对齐，电平条略增高更易读。

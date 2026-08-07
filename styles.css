@@ -424,6 +424,18 @@
   gap: 7px;
 }
 
+.crisp-asr-jobs__scan {
+  min-height: 22px;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid var(--crisp-asr-border);
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
 .crisp-asr-jobs__toggle {
   min-height: 22px;
   margin: 0;
@@ -439,6 +451,39 @@
 .crisp-asr-jobs__toggle:hover {
   border-color: color-mix(in srgb, var(--crisp-asr-accent) 28%, transparent);
   color: var(--text-normal);
+}
+
+.crisp-asr-scan-modal__search {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.crisp-asr-scan-modal__list {
+  display: flex;
+  max-height: 320px;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  overflow-y: auto;
+}
+
+.crisp-asr-scan-modal__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: var(--font-ui-smaller);
+}
+
+.crisp-asr-scan-modal__row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.crisp-asr-scan-modal__footer {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
 }
 
 .crisp-asr-job {

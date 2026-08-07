@@ -33,6 +33,7 @@ function plugin(overrides: Record<string, unknown> = {}): Record<string, unknown
     setSaveLiveAudio: async () => undefined,
     startLiveTranscription: async () => undefined,
     stopLiveTranscription: async () => undefined,
+    scanUntranscribedRecordings: async () => undefined,
     retryFileJob: async () => undefined,
     removeFileJob: async () => undefined,
     openFileJobResult: async () => undefined,
@@ -74,6 +75,25 @@ describe("Crisp ASR view controls", () => {
     expect(microphone?.value).toBe("bluetooth");
     expect(save?.checked).toBe(true);
     expect(meter?.style.width).toBe("42%");
+  });
+
+  it("offers a scan action in the recent jobs header", async () => {
+    let scans = 0;
+    const instance = plugin({
+      scanUntranscribedRecordings: async () => {
+        scans += 1;
+      },
+    });
+    const view = viewFor(instance);
+
+    await view.onOpen();
+
+    const scan = view.contentEl.querySelector<HTMLButtonElement>(
+      ".crisp-asr-jobs__scan",
+    );
+    expect(scan).not.toBeNull();
+    scan?.click();
+    expect(scans).toBe(1);
   });
 
   it("updates only the level meter when the input level changes", async () => {

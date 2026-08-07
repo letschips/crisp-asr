@@ -1,4 +1,5 @@
 import { isAudioPath } from "./audio";
+import type { AutoTranscribeScope } from "./settings";
 
 export interface EditorLineReader {
   lineCount(): number;
@@ -58,6 +59,22 @@ export function isObsidianRecordingPath(path: string): boolean {
   const parts = path.split("/");
   const fileName = parts[parts.length - 1] ?? "";
   return /^Recording \d{14}\.[^.]+$/i.test(fileName) && isAudioPath(path);
+}
+
+export function matchesAutoTranscribeScope(
+  path: string,
+  scope: AutoTranscribeScope,
+  folder: string,
+): boolean {
+  if (scope === "any") {
+    return isAudioPath(path);
+  }
+  if (scope === "folder") {
+    const normalized = folder.replace(/^\/+|\/+$/g, "");
+    return normalized.length > 0
+      && (path === normalized || path.startsWith(`${normalized}/`));
+  }
+  return isObsidianRecordingPath(path);
 }
 
 export function buildSidecarPath(

@@ -3,6 +3,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import CrispAsrPlugin from "../src/main";
+import { findUntranscribedAudio } from "../src/main";
+import { matchesAutoTranscribeScope } from "../src/file-routing";
 
 function createApp(): Record<string, unknown> {
   return {
@@ -42,6 +44,7 @@ describe("plugin interaction registration", () => {
     expect(commands).toContain("test-connection");
     expect(commands).toContain("test-ai-connection");
     expect(commands).toContain("transcribe-audio-near-cursor");
+    expect(commands).toContain("scan-untranscribed-recordings");
     expect(commands).toContain("polish-current-transcript");
     expect(commands).toContain("extract-current-transcript");
     expect(commands).toContain("custom-process-current-transcript");
@@ -150,5 +153,76 @@ describe("plugin interaction registration", () => {
         value: originalMediaDevices,
       });
     }
+  });
+});
+
+describe("auto-transcribe scope matching", () => {
+  it("matches only Obsidian recorder naming by default", () => {
+    expect(matchesAutoTranscribeScope(
+      "Recording 20260807120000.m4a",
+      "recording",
+      "",
+    )).toBe(true);
+    expect(matchesAutoTranscribeScope(
+      "语音备忘录.m4a",
+      "recording",
+      "",
+    )).toBe(false);
+    expect(matchesAutoTranscribeScope(
+      "notes/Recording 20260807120000.webm",
+      "recording",
+      "",
+    )).toBe(true);
+  });
+
+  it("matches any audio file in the chosen folder", () => {
+    expect(matchesAutoTranscribeScope(
+      "录音/语音备忘录.m4a",
+      "folder",
+      "/录音/",
+    )).toBe(true);
+    expect(matchesAutoTranscribeScope(
+      "其他/语音备忘录.m4a",
+      "folder",
+      "录音",
+    )).toBe(false);
+    expect(matchesAutoTranscribeScope(
+      "其他/Recording 20260807120000.m4a",
+      "folder",
+      "录音",
+    )).toBe(false);
+  });
+
+  it("matches any audio file when scope is any, but not non-audio files", () => {
+    expect(matchesAutoTranscribeScope("任意目录/语音备忘录.m4a", "any", ""))
+      .toBe(true);
+    expect(matchesAutoTranscribeScope("任意目录/笔记.md", "any", ""))
+      .toBe(false);
+  });
+});
+
+describe("untranscribed audio discovery", () => {
+  const files = [
+    { path: "录音/a.m4a" },
+    { path: "录音/b.mp3" },
+    { path: "录音/c.md" },
+    { path: "剪辑/d.webm" },
+    { path: "e.txt" },
+  ];
+
+  it("finds audio not yet processed or queued, sorted by path", () => {
+    expect(findUntranscribedAudio(
+      files,
+      ["录音/a.m4a"],
+      ["剪辑/d.webm"],
+    )).toEqual(["录音/b.mp3"]);
+  });
+
+  it("keeps failed jobs eligible for a rescan", () => {
+    expect(findUntranscribedAudio(
+      files,
+      [],
+      [],
+    )).toEqual(["剪辑/d.webm", "录音/a.m4a", "录音/b.mp3"]);
   });
 });
