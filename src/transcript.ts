@@ -43,6 +43,8 @@ export function extractTranscriptResult(payload: unknown): TranscriptResult {
 
 export class TranscriptAccumulator {
   private readonly finalized = new Map<string, TranscriptUtterance>();
+  private sortedCache: TranscriptUtterance[] = [];
+  private cacheValid = false;
   private previewText = "";
 
   consume(result: TranscriptResult): {
@@ -79,6 +81,9 @@ export class TranscriptAccumulator {
       this.finalized.set(key, normalized);
       added.push(normalized);
     }
+    if (added.length > 0) {
+      this.cacheValid = false;
+    }
     return { added, preview: this.previewText };
   }
 
@@ -91,10 +96,14 @@ export class TranscriptAccumulator {
   }
 
   utterances(): TranscriptUtterance[] {
-    return [...this.finalized.values()].sort((left, right) =>
-      left.start_time - right.start_time
-      || left.end_time - right.end_time
-    );
+    if (!this.cacheValid) {
+      this.sortedCache = [...this.finalized.values()].sort((left, right) =>
+        left.start_time - right.start_time
+        || left.end_time - right.end_time
+      );
+      this.cacheValid = true;
+    }
+    return this.sortedCache;
   }
 }
 

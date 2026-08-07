@@ -1,8 +1,3 @@
-export type LiveInputMode =
-  | "microphone"
-  | "computer"
-  | "computer-and-microphone";
-
 export type AiProvider =
   | "ark"
   | "openai"
@@ -46,7 +41,6 @@ export interface CrispAsrSettings {
   outputMode: "sidecar" | "current-note";
   liveResourceId: string;
   processedAudioPaths: string[];
-  liveInputMode: LiveInputMode;
   microphoneDeviceId: string;
   saveLiveAudio: boolean;
   liveAudioFolder: string;
@@ -67,8 +61,7 @@ export const DEFAULT_SETTINGS: CrispAsrSettings = {
   outputMode: "sidecar",
   liveResourceId: "volc.seedasr.sauc.duration",
   processedAudioPaths: [],
-  liveInputMode: "microphone",
-  microphoneDeviceId: "default",
+    microphoneDeviceId: "default",
   saveLiveAudio: false,
   liveAudioFolder: "Crisp ASR/Audio",
   fileJobs: [],
@@ -213,11 +206,6 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
         ? candidate.liveResourceId.trim()
         : DEFAULT_SETTINGS.liveResourceId,
     processedAudioPaths: history,
-    liveInputMode:
-      candidate.liveInputMode === "computer"
-      || candidate.liveInputMode === "computer-and-microphone"
-        ? candidate.liveInputMode
-        : "microphone",
     microphoneDeviceId:
       typeof candidate.microphoneDeviceId === "string"
       && candidate.microphoneDeviceId.trim().length > 0

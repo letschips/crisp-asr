@@ -47,6 +47,11 @@ describe("translucent window compatibility", () => {
       ruleFor(".crisp-asr-source-controls").style.getPropertyValue("display"),
     ).toBe("grid");
     expect(
+      ruleFor(".crisp-asr-source-controls").style.getPropertyValue(
+        "grid-template-columns",
+      ),
+    ).toBe("1fr");
+    expect(
       ruleFor(".crisp-asr-field").style.getPropertyValue("display"),
     ).toBe("grid");
     expect(
@@ -63,11 +68,6 @@ describe("translucent window compatibility", () => {
     expect(
       ruleFor(".crisp-asr-field__header").style.getPropertyValue("height"),
     ).toBe("20px");
-    expect(
-      ruleFor(
-        ".crisp-asr-source-controls.is-computer-only .crisp-asr-field",
-      ).style.getPropertyValue("grid-column"),
-    ).toBe("1 / -1");
     expect(
       ruleFor(".crisp-asr-level__fill").style.getPropertyValue("transition"),
     ).toContain("width");

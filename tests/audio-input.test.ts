@@ -122,27 +122,20 @@ describe("audio input acquisition", () => {
     const microphoneTrack = new FakeTrack();
     const microphoneStream = fakeStream([microphoneTrack]);
     let userConstraints: MediaStreamConstraints | undefined;
-    let displayCalls = 0;
     const devices = {
       getUserMedia: async (constraints: MediaStreamConstraints) => {
         userConstraints = constraints;
         return microphoneStream;
       },
-      getDisplayMedia: async () => {
-        displayCalls += 1;
-        return fakeStream([]);
-      },
     };
 
     const acquired = await acquireAudioInputs(
       devices,
-      "microphone",
       "mic-1",
       () => undefined,
     );
 
     expect(acquired.audioStreams).toEqual([microphoneStream]);
-    expect(displayCalls).toBe(0);
     expect(userConstraints?.audio).toMatchObject({
       deviceId: { exact: "mic-1" },
       channelCount: 1,
@@ -150,37 +143,6 @@ describe("audio input acquisition", () => {
     });
     acquired.stop();
     expect(microphoneTrack.stopped).toBe(true);
-  });
-
-  it("uses the system picker and microphone in combined mode", async () => {
-    const { acquireAudioInputs } = await import("../src/audio-input");
-    const microphoneStream = fakeStream([new FakeTrack()]);
-    const systemAudio = new FakeTrack();
-    const systemVideo = new FakeTrack();
-    const displayStream = fakeStream([systemAudio], [systemVideo]);
-    const devices = {
-      getUserMedia: async () => microphoneStream,
-      getDisplayMedia: async (constraints?: DisplayMediaStreamOptions) => {
-        expect(constraints).toEqual({
-          video: true,
-          audio: true,
-          systemAudio: "include",
-        });
-        return displayStream;
-      },
-    };
-
-    const acquired = await acquireAudioInputs(
-      devices,
-      "computer-and-microphone",
-      "default",
-      () => undefined,
-    );
-
-    expect(acquired.audioStreams).toEqual([displayStream, microphoneStream]);
-    acquired.stop();
-    expect(systemAudio.stopped).toBe(true);
-    expect(systemVideo.stopped).toBe(true);
   });
 
   it("retries the system default when a saved microphone is gone", async () => {
@@ -195,12 +157,10 @@ describe("audio input acquisition", () => {
         }
         return defaultStream;
       },
-      getDisplayMedia: async () => fakeStream([]),
     };
 
     const acquired = await acquireAudioInputs(
       devices,
-      "microphone",
       "missing-device",
       () => undefined,
     );
@@ -212,34 +172,15 @@ describe("audio input acquisition", () => {
     acquired.stop();
   });
 
-  it("rejects a shared source without audio and releases its video track", async () => {
-    const { acquireAudioInputs } = await import("../src/audio-input");
-    const videoTrack = new FakeTrack();
-    const devices = {
-      getUserMedia: async () => fakeStream([new FakeTrack()]),
-      getDisplayMedia: async () => fakeStream([], [videoTrack]),
-    };
-
-    await expect(acquireAudioInputs(
-      devices,
-      "computer",
-      "default",
-      () => undefined,
-    )).rejects.toThrow("没有共享电脑声音");
-    expect(videoTrack.stopped).toBe(true);
-  });
-
   it("reports an ended input once and cleanup does not report it", async () => {
     const { acquireAudioInputs } = await import("../src/audio-input");
     const track = new FakeTrack();
     let ended = 0;
     const devices = {
       getUserMedia: async () => fakeStream([track]),
-      getDisplayMedia: async () => fakeStream([]),
     };
     const acquired = await acquireAudioInputs(
       devices,
-      "microphone",
       "default",
       () => {
         ended += 1;

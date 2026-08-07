@@ -192,14 +192,9 @@
 
 .crisp-asr-source-controls {
   display: grid;
-  padding: 2px 12px 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 9px;
-}
-
-.crisp-asr-source-controls.is-computer-only .crisp-asr-field {
-  grid-column: 1 / -1;
+  padding: 4px 12px 12px;
+  grid-template-columns: 1fr;
+  gap: 10px;
 }
 
 .crisp-asr-field {
@@ -249,8 +244,7 @@
 
 .crisp-asr-recording-row {
   display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) minmax(72px, 0.75fr);
+  grid-template-columns: minmax(0, 1fr) minmax(64px, 0.6fr);
   align-items: center;
   gap: 10px;
 }
@@ -269,7 +263,8 @@
 }
 
 .crisp-asr-level {
-  height: 5px;
+  height: 6px;
+  min-width: 56px;
   overflow: hidden;
   border-radius: 999px;
   background: color-mix(in srgb, var(--text-muted) 13%, transparent);
@@ -285,7 +280,7 @@
 }
 
 .crisp-asr-actions {
-  padding: 3px 10px 11px;
+  padding: 4px 12px 12px;
   gap: 8px;
 }
 

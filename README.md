@@ -3,6 +3,44 @@
 Crisp ASR is a desktop-only Obsidian plugin by **letschips** that connects
 directly to Doubao Speech Recognition.
 
+## Version 0.4.12
+
+- 右侧面板布局打磨：声音来源移除后，麦克风选择改为全宽单列，统一卡片内边距与按钮对齐，电平条略增高更易读。
+
+## Version 0.4.11
+
+- 声音来源简化为仅麦克风：移除「电脑声音」与「电脑声音 + 麦克风」两个选项。Obsidian（Electron）不支持 `getDisplayMedia`，这两个模式在此环境中无法工作。老配置中的该字段会被忽略；如需转写系统声音（如浏览器视频），可用虚拟声卡（BlackHole 等）把系统输出路由到麦克风后选择对应设备。
+
+## Version 0.4.10
+
+- 电脑声音模式错误提示：Obsidian（Electron）不支持 `getDisplayMedia`，此前会直接报 `Not supported`。现在会给出明确提示，并建议改用麦克风模式或通过虚拟声卡（BlackHole 等）把系统声音路由到麦克风。
+
+## Version 0.4.9
+
+- 修复电脑声音模式回归：0.4.7 的 display media video track 优化在 Chrome/Electron 中会导致系统音频随 video track 一起停止，已回滚。
+
+## Version 0.4.8
+
+- 麦克风静音检测：实时听写期间连续 30 秒输入静音（RMS < 0.01）时自动停止会话并保存已有转写，提示用户麦克风可能已被系统静音或权限被撤销，不再持续计费无产出。
+
+## Version 0.4.7
+
+- WebSocket 自动重连：网络抖动导致连接断开时，自动尝试重连（最多 3 次，1s/2s/4s 退避），重连期间缓冲音频，成功后恢复听写，不再因瞬时断网丢失整场会话。
+- 转写累积器排序缓存：`utterances()` 仅在有新增 finalized utterance 时排序，服务器推送但无新增时直接返回缓存数组，长录音（1 小时+）性能显著改善。
+- 系统声音采集优化：获取 display media 后立即停止 video track，不再浪费 CPU/GPU 编码屏幕画面。
+
+## Version 0.4.6
+
+- 网络断开保护：WebSocket 意外关闭时通知用户（不再静默失败），已累积的转写文本仍能写入笔记。
+- `sendAudio` 在连接断开后静默返回而非抛出异常，防止 `onaudioprocess` 回调中的静默错误和内存增长。
+- `finishLiveResources` 中 `stopPcm()` 移入 try/catch，收尾失败不再阻止已累积转写的保存。
+- 录音器 `onerror` 自动停止录音，避免错误后继续浪费资源。
+- `finish()` 5 秒超时改为通知用户「末尾内容可能不完整」。
+
+## Version 0.4.5
+
+- WebSocket 连接超时保护：实时听写启动时如果豆包 ASR 服务器在 15 秒内未响应，自动断开并提示用户检查网络，不再永久卡在「连接中」状态。
+
 ## Version 0.4.4
 
 Crisp ASR keeps Doubao Speech Recognition as the dedicated transcription

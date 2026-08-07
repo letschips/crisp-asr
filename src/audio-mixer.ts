@@ -6,6 +6,8 @@ import {
 const TARGET_SAMPLE_RATE = 16_000;
 const PACKET_SAMPLES = 3_200;
 const LEVEL_INTERVAL_MS = 100;
+const SILENCE_THRESHOLD = 0.01;
+const SILENCE_DURATION_MS = 30_000;
 
 export function calculateRmsLevel(samples: Float32Array): number {
   if (samples.length === 0) {
@@ -59,6 +61,7 @@ export class PcmPacketizer {
 export interface LiveAudioMixerOptions {
   onPacket: (packet: Uint8Array) => void;
   onLevel: (level: number) => void;
+  onSilence?: () => void;
 }
 
 export class LiveAudioMixer {
@@ -72,6 +75,8 @@ export class LiveAudioMixer {
   private level = 0;
   private lastLevelAt = 0;
   private pcmRunning = false;
+  private silentSince = 0;
+  private silenceNotified = false;
 
   constructor(
     private readonly ownerWindow: Window & typeof globalThis,
@@ -122,6 +127,18 @@ export class LiveAudioMixer {
         this.lastLevelAt = now;
         this.options.onLevel(this.level);
       }
+      if (this.level > SILENCE_THRESHOLD) {
+        this.silentSince = 0;
+        this.silenceNotified = false;
+      } else if (this.silentSince === 0) {
+        this.silentSince = now;
+      } else if (
+        !this.silenceNotified
+        && now - this.silentSince >= SILENCE_DURATION_MS
+      ) {
+        this.silenceNotified = true;
+        this.options.onSilence?.();
+      }
       for (
         const packet of this.packetizer.push(
           input,
@@ -144,6 +161,8 @@ export class LiveAudioMixer {
       return;
     }
     this.pcmRunning = false;
+    this.silentSince = 0;
+    this.silenceNotified = false;
     if (this.processor) {
       this.processor.onaudioprocess = null;
       this.compressor?.disconnect(this.processor);

@@ -59,7 +59,6 @@ import {
   DEFAULT_SETTINGS,
   normalizeSettings,
   type CrispAsrSettings,
-  type LiveInputMode,
   type PersistedFileJob,
 } from "./settings";
 import { DoubaoStreamingClient } from "./streaming-client";
@@ -556,11 +555,6 @@ export default class CrispAsrPlugin extends Plugin {
     }
   }
 
-  async setLiveInputMode(mode: LiveInputMode): Promise<void> {
-    this.settings.liveInputMode = mode;
-    await this.saveSettings();
-  }
-
   async setMicrophoneDevice(deviceId: string): Promise<void> {
     this.settings.microphoneDeviceId = deviceId || "default";
     await this.saveSettings();
@@ -755,12 +749,19 @@ export default class CrispAsrPlugin extends Plugin {
           this.liveSession.logId = logId;
         }
       },
+      onReconnecting: () => {
+        this.uiState.status = "正在重连…";
+        this.emit();
+      },
+      onReconnected: () => {
+        this.uiState.status = "正在听写";
+        this.emit();
+      },
     });
     const capture = new LivePcmCapture(
       window,
       (packet) => client.sendAudio(packet),
       {
-        mode: this.settings.liveInputMode,
         microphoneDeviceId: this.settings.microphoneDeviceId,
         onLevel: (level) => {
           this.uiState.inputLevel = level;
@@ -773,6 +774,13 @@ export default class CrispAsrPlugin extends Plugin {
             );
           } else {
             inputEndedDuringStartup = true;
+          }
+        },
+        onSilence: () => {
+          if (this.liveSession) {
+            void this.stopLiveTranscription(
+              new Error("检测到持续静音 30 秒，麦克风可能已被系统静音或权限被撤销"),
+            );
           }
         },
       },

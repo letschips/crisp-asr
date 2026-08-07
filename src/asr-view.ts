@@ -16,7 +16,6 @@ interface ViewSnapshot {
   finalized: readonly unknown[];
   jobs: readonly unknown[];
   microphones: readonly unknown[];
-  liveInputMode: string;
   microphoneDeviceId: string;
   saveLiveAudio: boolean;
   smartTargetPath: string | null;
@@ -123,7 +122,6 @@ export class CrispAsrView extends ItemView {
       finalized: state.finalized,
       jobs: state.jobs,
       microphones: state.microphones,
-      liveInputMode: this.plugin.settings.liveInputMode,
       microphoneDeviceId: this.plugin.settings.microphoneDeviceId,
       saveLiveAudio: this.plugin.settings.saveLiveAudio,
       smartTargetPath: state.smartTargetPath,
@@ -143,7 +141,6 @@ export class CrispAsrView extends ItemView {
       && left.finalized === right.finalized
       && left.jobs === right.jobs
       && left.microphones === right.microphones
-      && left.liveInputMode === right.liveInputMode
       && left.microphoneDeviceId === right.microphoneDeviceId
       && left.saveLiveAudio === right.saveLiveAudio
       && left.smartTargetPath === right.smartTargetPath
@@ -241,77 +238,40 @@ export class CrispAsrView extends ItemView {
     const actionRow = document.createElement("div");
     actionRow.className = "crisp-asr-actions";
     const sourceControls = document.createElement("div");
-    sourceControls.className = this.plugin.settings.liveInputMode === "computer"
-      ? "crisp-asr-source-controls is-computer-only"
-      : "crisp-asr-source-controls";
+    sourceControls.className = "crisp-asr-source-controls";
     const locked = state.mode !== "idle" && state.mode !== "error";
 
-    const modeField = document.createElement("label");
-    modeField.className = "crisp-asr-field";
-    const modeLabel = document.createElement("span");
-    modeLabel.className = "crisp-asr-field__header";
-    modeLabel.textContent = "声音来源";
-    const modeSelect = document.createElement("select");
-    modeSelect.className = "crisp-asr-input-mode dropdown";
-    modeSelect.disabled = locked;
-    for (
-      const [value, label] of [
-        ["microphone", "麦克风"],
-        ["computer", "电脑声音"],
-        ["computer-and-microphone", "电脑声音 + 麦克风"],
-      ] as const
-    ) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      modeSelect.append(option);
-    }
-    modeSelect.value = this.plugin.settings.liveInputMode;
-    modeSelect.addEventListener("change", () => {
-      const value = modeSelect.value;
-      void this.plugin.setLiveInputMode(
-        value === "computer" || value === "computer-and-microphone"
-          ? value
-          : "microphone",
-      );
+    const microphoneField = document.createElement("label");
+    microphoneField.className = "crisp-asr-field crisp-asr-microphone-field";
+    const microphoneHeader = document.createElement("span");
+    microphoneHeader.className = "crisp-asr-field__header";
+    const microphoneLabel = document.createElement("span");
+    microphoneLabel.textContent = "麦克风";
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "crisp-asr-device-refresh clickable-icon";
+    refresh.ariaLabel = "刷新麦克风设备";
+    refresh.disabled = locked;
+    setIcon(refresh, "refresh-cw");
+    refresh.addEventListener("click", () => {
+      void this.plugin.refreshMicrophones(true);
     });
-    modeField.append(modeLabel, modeSelect);
-    sourceControls.append(modeField);
-
-    if (this.plugin.settings.liveInputMode !== "computer") {
-      const microphoneField = document.createElement("label");
-      microphoneField.className =
-        "crisp-asr-field crisp-asr-microphone-field";
-      const microphoneHeader = document.createElement("span");
-      microphoneHeader.className = "crisp-asr-field__header";
-      const microphoneLabel = document.createElement("span");
-      microphoneLabel.textContent = "麦克风";
-      const refresh = document.createElement("button");
-      refresh.type = "button";
-      refresh.className = "crisp-asr-device-refresh clickable-icon";
-      refresh.ariaLabel = "刷新麦克风设备";
-      refresh.disabled = locked;
-      setIcon(refresh, "refresh-cw");
-      refresh.addEventListener("click", () => {
-        void this.plugin.refreshMicrophones(true);
-      });
-      microphoneHeader.append(microphoneLabel, refresh);
-      const microphoneSelect = document.createElement("select");
-      microphoneSelect.className = "crisp-asr-microphone dropdown";
-      microphoneSelect.disabled = locked;
-      for (const microphone of state.microphones) {
-        const option = document.createElement("option");
-        option.value = microphone.deviceId;
-        option.textContent = microphone.label;
-        microphoneSelect.append(option);
-      }
-      microphoneSelect.value = this.plugin.settings.microphoneDeviceId;
-      microphoneSelect.addEventListener("change", () => {
-        void this.plugin.setMicrophoneDevice(microphoneSelect.value);
-      });
-      microphoneField.append(microphoneHeader, microphoneSelect);
-      sourceControls.append(microphoneField);
+    microphoneHeader.append(microphoneLabel, refresh);
+    const microphoneSelect = document.createElement("select");
+    microphoneSelect.className = "crisp-asr-microphone dropdown";
+    microphoneSelect.disabled = locked;
+    for (const microphone of state.microphones) {
+      const option = document.createElement("option");
+      option.value = microphone.deviceId;
+      option.textContent = microphone.label;
+      microphoneSelect.append(option);
     }
+    microphoneSelect.value = this.plugin.settings.microphoneDeviceId;
+    microphoneSelect.addEventListener("change", () => {
+      void this.plugin.setMicrophoneDevice(microphoneSelect.value);
+    });
+    microphoneField.append(microphoneHeader, microphoneSelect);
+    sourceControls.append(microphoneField);
 
     const recordingRow = document.createElement("div");
     recordingRow.className = "crisp-asr-recording-row";

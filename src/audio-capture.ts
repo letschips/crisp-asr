@@ -7,7 +7,6 @@ import {
   LiveAudioMixer,
   type LiveAudioMixerOptions,
 } from "./audio-mixer";
-import type { LiveInputMode } from "./settings";
 
 interface AudioMixer {
   start: (streams: MediaStream[]) => Promise<MediaStream>;
@@ -16,10 +15,10 @@ interface AudioMixer {
 }
 
 export interface LivePcmCaptureOptions {
-  mode: LiveInputMode;
   microphoneDeviceId: string;
   onLevel: (level: number) => void;
   onInputEnded: () => void;
+  onSilence?: () => void;
   acquireInputs?: typeof acquireAudioInputs;
   createMixer?: (
     ownerWindow: Window & typeof globalThis,
@@ -35,7 +34,6 @@ export class LivePcmCapture {
     private readonly ownerWindow: Window & typeof globalThis,
     private readonly onPacket: (packet: Uint8Array) => void,
     private readonly options: LivePcmCaptureOptions = {
-      mode: "microphone",
       microphoneDeviceId: "default",
       onLevel: () => undefined,
       onInputEnded: () => undefined,
@@ -53,7 +51,6 @@ export class LivePcmCapture {
     const acquire = this.options.acquireInputs ?? acquireAudioInputs;
     this.acquired = await acquire(
       mediaDevices as unknown as AudioMediaDevices,
-      this.options.mode,
       this.options.microphoneDeviceId,
       this.options.onInputEnded,
     );
@@ -72,6 +69,7 @@ export class LivePcmCapture {
     const mixer = createMixer(this.ownerWindow, {
       onPacket: this.onPacket,
       onLevel: this.options.onLevel,
+      onSilence: this.options.onSilence,
     });
     this.mixer = mixer;
     try {

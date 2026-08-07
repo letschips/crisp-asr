@@ -6,7 +6,6 @@ import { CrispAsrView } from "../src/asr-view";
 function plugin(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     settings: {
-      liveInputMode: "computer-and-microphone",
       microphoneDeviceId: "bluetooth",
       saveLiveAudio: true,
       aiProvider: "ark",
@@ -30,7 +29,6 @@ function plugin(overrides: Record<string, unknown> = {}): Record<string, unknown
     subscribe: () => () => undefined,
     formatElapsed: () => "00:00",
     refreshMicrophones: async () => undefined,
-    setLiveInputMode: async () => undefined,
     setMicrophoneDevice: async () => undefined,
     setSaveLiveAudio: async () => undefined,
     startLiveTranscription: async () => undefined,
@@ -59,14 +57,11 @@ describe("Crisp ASR view controls", () => {
     document.body.replaceChildren();
   });
 
-  it("shows source mode, microphone, recording and level controls", async () => {
+  it("shows microphone, recording and level controls", async () => {
     const view = viewFor(plugin());
 
     await view.onOpen();
 
-    const mode = view.contentEl.querySelector<HTMLSelectElement>(
-      ".crisp-asr-input-mode",
-    );
     const microphone = view.contentEl.querySelector<HTMLSelectElement>(
       ".crisp-asr-microphone",
     );
@@ -76,7 +71,6 @@ describe("Crisp ASR view controls", () => {
     const meter = view.contentEl.querySelector<HTMLElement>(
       ".crisp-asr-level__fill",
     );
-    expect(mode?.value).toBe("computer-and-microphone");
     expect(microphone?.value).toBe("bluetooth");
     expect(save?.checked).toBe(true);
     expect(meter?.style.width).toBe("42%");
@@ -174,7 +168,7 @@ describe("Crisp ASR view controls", () => {
     ).toBe(120);
   });
 
-  it("uses the same header row for source and microphone labels", async () => {
+  it("shows the microphone label header", async () => {
     const view = viewFor(plugin());
 
     await view.onOpen();
@@ -182,25 +176,7 @@ describe("Crisp ASR view controls", () => {
     const headers = Array.from(
       view.contentEl.querySelectorAll(".crisp-asr-field__header"),
     ).map((element) => element.textContent?.trim());
-    expect(headers).toHaveLength(2);
-    expect(headers[0]).toBe("声音来源");
-    expect(headers[1]).toContain("麦克风");
-  });
-
-  it("hides microphone selection for computer-only capture", async () => {
-    const instance = plugin();
-    (instance.settings as { liveInputMode: string }).liveInputMode = "computer";
-    const view = viewFor(instance);
-
-    await view.onOpen();
-
-    expect(
-      view.contentEl.querySelector(".crisp-asr-microphone-field"),
-    ).toBeNull();
-    expect(
-      view.contentEl.querySelector(".crisp-asr-source-controls")
-        ?.classList.contains("is-computer-only"),
-    ).toBe(true);
+    expect(headers).toEqual(["麦克风"]);
   });
 
   it("explains where a live transcript goes when no note is open", async () => {

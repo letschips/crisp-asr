@@ -54,7 +54,12 @@ export async function startLiveResources(
 export async function finishLiveResources(
   resources: LiveSessionResources,
 ): Promise<LiveFinishResult> {
-  resources.capture.stopPcm();
+  let stopPcmError: Error | undefined;
+  try {
+    resources.capture.stopPcm();
+  } catch (error) {
+    stopPcmError = asError(error);
+  }
   let audioPath: string | undefined;
   let recordingError: Error | undefined;
   let finishError: Error | undefined;
@@ -74,6 +79,7 @@ export async function finishLiveResources(
     ...(audioPath ? { audioPath } : {}),
     ...(recordingError ? { recordingError } : {}),
     ...(finishError ? { finishError } : {}),
+    ...(stopPcmError ? { finishError: finishError ?? stopPcmError } : {}),
   };
 }
 

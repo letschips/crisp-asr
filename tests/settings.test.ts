@@ -15,7 +15,6 @@ describe("settings normalization", () => {
     expect(DEFAULT_SETTINGS.aiOutputMode).toBe("same-note");
     expect(DEFAULT_SETTINGS.customPrompt).toBe("");
     expect(DEFAULT_SETTINGS.autoTranscribeRecordings).toBe(false);
-    expect(DEFAULT_SETTINGS.liveInputMode).toBe("microphone");
     expect(DEFAULT_SETTINGS.microphoneDeviceId).toBe("default");
     expect(DEFAULT_SETTINGS.saveLiveAudio).toBe(false);
     expect(DEFAULT_SETTINGS.liveAudioFolder).toBe("Crisp ASR/Audio");
@@ -52,7 +51,7 @@ describe("settings normalization", () => {
       liveAudioFolder: " /Crisp ASR//Audio/ ",
     });
 
-    expect(settings.liveInputMode).toBe("computer-and-microphone");
+    expect("liveInputMode" in settings).toBe(false);
     expect(settings.microphoneDeviceId).toBe("bluetooth-mic");
     expect(settings.saveLiveAudio).toBe(true);
     expect(settings.liveAudioFolder).toBe("Crisp ASR/Audio");
@@ -103,7 +102,7 @@ describe("settings normalization", () => {
       liveAudioFolder: "/",
     });
 
-    expect(settings.liveInputMode).toBe("microphone");
+    expect("liveInputMode" in settings).toBe(false);
     expect(settings.microphoneDeviceId).toBe("default");
     expect(settings.liveAudioFolder).toBe("Crisp ASR/Audio");
   });

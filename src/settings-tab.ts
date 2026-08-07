@@ -309,25 +309,17 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const live = createSettingGroup(
       containerEl,
       "实时输入",
-      "选择麦克风、电脑声音与可选原始音频保存",
+      "选择麦克风与可选原始音频保存",
       true,
     );
 
     new Setting(live)
       .setName("默认声音来源")
-      .setDesc("电脑声音会打开 macOS 系统共享选择窗口。")
-      .addDropdown((dropdown) => dropdown
-        .addOption("microphone", "麦克风")
-        .addOption("computer", "电脑声音")
-        .addOption("computer-and-microphone", "电脑声音 + 麦克风")
-        .setValue(this.plugin.settings.liveInputMode)
-        .onChange(async (value) => {
-          await this.plugin.setLiveInputMode(
-            value === "computer" || value === "computer-and-microphone"
-              ? value
-              : "microphone",
-          );
-        }));
+      .setDesc(
+        "仅支持麦克风。Obsidian 不支持直接捕获系统声音；"
+        + "如需转写浏览器或 App 播放的声音，可用虚拟声卡（如 BlackHole）"
+        + "把系统输出路由到麦克风后选择对应设备。",
+      );
 
     new Setting(live)
       .setName("首选麦克风")
@@ -432,13 +424,13 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const notice = containerEl.createDiv({ cls: "crisp-asr-privacy" });
     notice.createEl("strong", { text: "数据边界" });
     notice.createEl("p", {
-      text: "启用转写后，所选文件、麦克风或经 macOS 明确授权的电脑声音会直接发送至火山引擎。只有手动点击智能处理时，原始转写文字才会发送至所选 AI 服务商。插件不自建中转服务器，也不会把 API Key 写入 data.json。",
+      text: "启用转写后，所选文件或麦克风的声音会直接发送至火山引擎。只有手动点击智能处理时，原始转写文字才会发送至所选 AI 服务商。插件不自建中转服务器，也不会把 API Key 写入 data.json。",
     });
 
     renderAboutCard(
       containerEl,
       "Crisp ASR",
-      "把录音、麦克风和电脑声音安静地转写成 Obsidian 笔记。",
+      "把录音和麦克风安静地转写成 Obsidian 笔记。",
     );
   }
 }

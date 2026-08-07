@@ -91,6 +91,9 @@ export class LiveAudioRecorder {
     recorder.onerror = (event) => {
       const cause = (event as Event & { error?: Error }).error;
       this.recorderError = cause ?? new Error("浏览器录音失败");
+      if (recorder.state !== "inactive") {
+        recorder.stop();
+      }
     };
     recorder.start(RECORDING_TIMESLICE_MS);
   }

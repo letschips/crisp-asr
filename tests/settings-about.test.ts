@@ -9,14 +9,14 @@ describe("settings About card", () => {
     renderAboutCard(
       container,
       "Crisp ASR",
-      "把录音、麦克风和电脑声音安静地转写成 Obsidian 笔记。",
+      "把录音和麦克风安静地转写成 Obsidian 笔记。",
     );
 
     const card = container.querySelector(".crisp-asr-about");
     const author = card?.querySelector<HTMLAnchorElement>("a");
     expect(card?.querySelector("h3")?.textContent).toBe("About Crisp ASR");
     expect(card?.textContent).toContain(
-      "把录音、麦克风和电脑声音安静地转写成 Obsidian 笔记。",
+      "把录音和麦克风安静地转写成 Obsidian 笔记。",
     );
     expect(author?.textContent).toBe("小红书 letschips");
     expect(author?.href).toBe("https://xhslink.cn/m/3MwtKu4822b");

@@ -28,12 +28,11 @@ describe("live PCM capture coordinator", () => {
       { navigator: { mediaDevices: {} } } as never,
       () => undefined,
       {
-        mode: "computer-and-microphone",
         microphoneDeviceId: "bluetooth",
         onLevel: () => undefined,
         onInputEnded: () => undefined,
-        acquireInputs: async (_devices, mode, deviceId) => {
-          events.push(`inputs:acquire:${mode}:${deviceId}`);
+        acquireInputs: async (_devices, deviceId) => {
+          events.push(`inputs:acquire:${deviceId}`);
           return acquired;
         },
         createMixer: () => mixer,
@@ -42,11 +41,11 @@ describe("live PCM capture coordinator", () => {
 
     await capture.acquire();
     expect(events).toEqual([
-      "inputs:acquire:computer-and-microphone:bluetooth",
+      "inputs:acquire:bluetooth",
     ]);
     await expect(capture.start()).resolves.toBe(mixedStream);
     expect(events).toEqual([
-      "inputs:acquire:computer-and-microphone:bluetooth",
+      "inputs:acquire:bluetooth",
       "mixer:start:1",
     ]);
 
@@ -65,7 +64,6 @@ describe("live PCM capture coordinator", () => {
       { navigator: { mediaDevices: {} } } as never,
       () => undefined,
       {
-        mode: "microphone",
         microphoneDeviceId: "default",
         onLevel: () => undefined,
         onInputEnded: () => undefined,

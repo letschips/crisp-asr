@@ -1,5 +1,3 @@
-import type { LiveInputMode } from "./settings";
-
 export interface MicrophoneDevice {
   deviceId: string;
   label: string;
@@ -15,9 +13,6 @@ export interface AudioMediaDevices {
   enumerateDevices?: () => Promise<DeviceInfoLike[]>;
   getUserMedia?: (
     constraints: MediaStreamConstraints,
-  ) => Promise<MediaStream>;
-  getDisplayMedia?: (
-    constraints?: DisplayMediaStreamOptions,
   ) => Promise<MediaStream>;
 }
 
@@ -125,49 +120,31 @@ function stopStreams(streams: MediaStream[]): void {
 
 export async function acquireAudioInputs(
   mediaDevices: AudioMediaDevices,
-  mode: LiveInputMode,
   microphoneDeviceId: string,
   onInputEnded: () => void,
 ): Promise<AcquiredAudioInputs> {
   const acquired: MediaStream[] = [];
   try {
-    if (mode === "computer" || mode === "computer-and-microphone") {
-      if (!mediaDevices.getDisplayMedia) {
-        throw new Error("当前环境无法共享电脑声音");
-      }
-      const displayOptions = {
-        video: true,
-        audio: true,
-        systemAudio: "include",
-      } as DisplayMediaStreamOptions & { systemAudio: "include" };
-      const display = await mediaDevices.getDisplayMedia(displayOptions);
-      acquired.push(display);
-      if (display.getAudioTracks().length === 0) {
-        throw new Error("所选共享来源没有共享电脑声音");
-      }
+    if (!mediaDevices.getUserMedia) {
+      throw new Error("当前环境无法访问麦克风");
     }
-    if (mode === "microphone" || mode === "computer-and-microphone") {
-      if (!mediaDevices.getUserMedia) {
-        throw new Error("当前环境无法访问麦克风");
+    let microphone: MediaStream;
+    try {
+      microphone = await mediaDevices.getUserMedia({
+        audio: microphoneConstraints(microphoneDeviceId),
+      });
+    } catch (error) {
+      if (
+        microphoneDeviceId === "default"
+        || !missingSelectedDevice(error)
+      ) {
+        throw error;
       }
-      let microphone: MediaStream;
-      try {
-        microphone = await mediaDevices.getUserMedia({
-          audio: microphoneConstraints(microphoneDeviceId),
-        });
-      } catch (error) {
-        if (
-          microphoneDeviceId === "default"
-          || !missingSelectedDevice(error)
-        ) {
-          throw error;
-        }
-        microphone = await mediaDevices.getUserMedia({
-          audio: microphoneConstraints("default"),
-        });
-      }
-      acquired.push(microphone);
+      microphone = await mediaDevices.getUserMedia({
+        audio: microphoneConstraints("default"),
+      });
     }
+    acquired.push(microphone);
   } catch (error) {
     stopStreams(acquired);
     throw error;
