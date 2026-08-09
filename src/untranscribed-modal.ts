@@ -1,6 +1,7 @@
 import { App, Modal, Notice } from "obsidian";
 
 function el(
+  document: Document,
   tag: string,
   className = "",
   text?: string,
@@ -43,9 +44,11 @@ export class UntranscribedAudioModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
+    const document = contentEl.ownerDocument;
     contentEl.classList.add("crisp-asr-scan-modal");
-    contentEl.append(el("h3", "", "扫描未转写录音"));
+    contentEl.append(el(document, "h3", "", "扫描未转写录音"));
     const search = el(
+      document,
       "input",
       "crisp-asr-scan-modal__search",
     ) as HTMLInputElement;
@@ -55,8 +58,8 @@ export class UntranscribedAudioModal extends Modal {
       this.query = search.value;
       this.renderList();
     });
-    const actions = el("div", "crisp-asr-scan-modal__actions");
-    const selectAll = el("button", "", "全选");
+    const actions = el(document, "div", "crisp-asr-scan-modal__actions");
+    const selectAll = el(document, "button", "", "全选");
     selectAll.addEventListener("click", () => {
       const allSelected = this.results.length > 0
         && this.results.every((path) => this.selected.has(path));
@@ -70,9 +73,9 @@ export class UntranscribedAudioModal extends Modal {
       this.renderList();
     });
     actions.append(selectAll);
-    this.listEl = el("div", "crisp-asr-scan-modal__list");
-    this.footerEl = el("p", "crisp-asr-scan-modal__footer");
-    const confirm = el("button", "mod-cta", "转写所选");
+    this.listEl = el(document, "div", "crisp-asr-scan-modal__list");
+    this.footerEl = el(document, "p", "crisp-asr-scan-modal__footer");
+    const confirm = el(document, "button", "mod-cta", "转写所选");
     confirm.addEventListener("click", () => {
       const paths = [...this.selected];
       if (paths.length === 0) {
@@ -96,13 +99,14 @@ export class UntranscribedAudioModal extends Modal {
       return;
     }
     list.replaceChildren();
+    const document = list.ownerDocument;
     this.results = filterUntranscribedCandidates(
       this.candidates,
       this.query,
     );
     for (const path of this.results) {
-      const row = el("label", "crisp-asr-scan-modal__row");
-      const checkbox = el("input") as HTMLInputElement;
+      const row = el(document, "label", "crisp-asr-scan-modal__row");
+      const checkbox = el(document, "input") as HTMLInputElement;
       checkbox.setAttribute("type", "checkbox");
       checkbox.checked = this.selected.has(path);
       checkbox.addEventListener("change", () => {
@@ -113,7 +117,7 @@ export class UntranscribedAudioModal extends Modal {
         }
         this.updateFooter();
       });
-      row.append(checkbox, el("span", "", path));
+      row.append(checkbox, el(document, "span", "", path));
       list.append(row);
     }
     this.updateFooter();

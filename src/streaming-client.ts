@@ -38,6 +38,12 @@ export class PendingAudioQueue {
       final: true,
     };
   }
+
+  takePending(): Uint8Array | null {
+    const pending = this.pending;
+    this.pending = null;
+    return pending;
+  }
 }
 
 export interface DoubaoStreamingClientOptions {
@@ -55,6 +61,7 @@ const STREAM_URL =
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_DELAYS = [1_000, 2_000, 4_000];
+const MAX_RECONNECT_AUDIO_PACKETS = 600;
 
 function rawDataToBytes(data: RawData): Uint8Array {
   if (Array.isArray(data)) {
@@ -76,6 +83,7 @@ export class DoubaoStreamingClient {
   private dead = false;
   private reconnecting = false;
   private reconnectAttempts = 0;
+  private reconnectAudio: Uint8Array[] = [];
 
   constructor(private readonly options: DoubaoStreamingClientOptions) {}
 
@@ -92,6 +100,7 @@ export class DoubaoStreamingClient {
       },
     });
     this.socket = socket;
+    let opened = false;
     socket.binaryType = "arraybuffer";
     socket.on("upgrade", (response) => {
       const value = response.headers["x-tt-logid"];
@@ -118,21 +127,29 @@ export class DoubaoStreamingClient {
         );
       }
     });
-    socket.on("error", (error) => {
-      this.options.onError(
-        error instanceof Error ? error : new Error(String(error)),
-      );
+    socket.on("error", () => {
+      if (
+        opened
+        && this.socket === socket
+        && !this.closedByUser
+        && this.finishPromise === null
+      ) {
+        socket.close();
+      }
     });
     socket.on("close", () => {
+      if (this.socket !== socket) {
+        return;
+      }
       const wasUnexpected = !this.closedByUser;
       const wasFinished = this.finishPromise !== null;
-      this.completeFinish();
       this.socket = null;
-      if (wasUnexpected && !this.dead && !wasFinished && !this.reconnecting) {
-        void this.attemptReconnect();
-      } else if (wasUnexpected && !this.dead) {
-        this.dead = true;
-        this.options.onError(new Error("实时转写连接已断开"));
+      if (wasFinished || !wasUnexpected) {
+        this.completeFinish();
+        return;
+      }
+      if (opened) {
+        this.handleUnexpectedClose();
       }
     });
 
@@ -145,16 +162,26 @@ export class DoubaoStreamingClient {
       }, 15_000);
       const handleOpen = (): void => {
         clearTimeout(connectTimeout);
+        opened = true;
         socket.off("error", handleInitialError);
+        socket.off("close", handleInitialClose);
         resolve();
       };
       const handleInitialError = (error: Error): void => {
         clearTimeout(connectTimeout);
         socket.off("open", handleOpen);
+        socket.off("close", handleInitialClose);
         reject(error);
+      };
+      const handleInitialClose = (): void => {
+        clearTimeout(connectTimeout);
+        socket.off("open", handleOpen);
+        socket.off("error", handleInitialError);
+        reject(new Error("实时转写连接在建立前已断开"));
       };
       socket.once("open", handleOpen);
       socket.once("error", handleInitialError);
+      socket.once("close", handleInitialClose);
     });
 
     socket.send(buildFullClientRequest({
@@ -183,7 +210,7 @@ export class DoubaoStreamingClient {
       return;
     }
     if (this.reconnecting) {
-      this.queue.push(audio);
+      this.bufferReconnectAudio(audio);
       return;
     }
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
@@ -198,11 +225,10 @@ export class DoubaoStreamingClient {
   }
 
   private async attemptReconnect(): Promise<void> {
-    if (
-      this.reconnecting
-      || this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS
-      || this.dead
-    ) {
+    if (this.reconnecting || this.dead || this.closedByUser) {
+      return;
+    }
+    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       this.dead = true;
       this.options.onError(
         new Error("实时转写连接已断开，自动重连失败"),
@@ -228,8 +254,16 @@ export class DoubaoStreamingClient {
       this.resolveFinish = null;
       this.finishTimer = null;
       await this.connect();
+      const reconnectedSocket = this.socket as WebSocket | null;
+      if (!reconnectedSocket || reconnectedSocket.readyState !== WebSocket.OPEN) {
+        throw new Error("实时转写重连未能保持连接");
+      }
       this.reconnecting = false;
       this.reconnectAttempts = 0;
+      const bufferedAudio = this.reconnectAudio.splice(0);
+      for (const audio of bufferedAudio) {
+        this.sendAudio(audio);
+      }
       this.options.onReconnected?.();
     } catch {
       this.reconnecting = false;
@@ -266,7 +300,29 @@ export class DoubaoStreamingClient {
 
   close(): void {
     this.closedByUser = true;
+    this.reconnectAudio = [];
     this.completeFinish();
+  }
+
+  private handleUnexpectedClose(): void {
+    const pending = this.queue.takePending();
+    if (pending) {
+      this.reconnectAudio.unshift(pending);
+    }
+    this.closedByUser = false;
+    if (!this.dead && !this.reconnecting) {
+      void this.attemptReconnect();
+    }
+  }
+
+  private bufferReconnectAudio(audio: Uint8Array): void {
+    this.reconnectAudio.push(audio.slice());
+    if (this.reconnectAudio.length > MAX_RECONNECT_AUDIO_PACKETS) {
+      this.reconnectAudio.splice(
+        0,
+        this.reconnectAudio.length - MAX_RECONNECT_AUDIO_PACKETS,
+      );
+    }
   }
 
   private completeFinish(): void {

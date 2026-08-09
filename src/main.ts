@@ -930,6 +930,13 @@ export default class CrispAsrPlugin extends Plugin {
     }
     const session = this.liveSession;
     if (!session) {
+      if (this.liveStarting && this.liveStartAbort) {
+        this.liveStartAbort.abort();
+        this.uiState.mode = "idle";
+        this.uiState.status = "就绪";
+        this.uiState.inputLevel = 0;
+        this.emit();
+      }
       return;
     }
     const stopping = this.finishLiveSession(session, reason);

@@ -3,6 +3,12 @@
 Crisp ASR is a desktop-only Obsidian plugin by **letschips** that connects
 directly to Doubao Speech Recognition.
 
+## Version 0.4.15
+
+- 修复实时听写断线后的自动重连：意外断开不再被误判为用户主动结束，重连期间的麦克风音频会完整缓冲并在恢复后续传。
+- 连接建立期间现在可以立即停止，不再出现“连接中”按钮无效；扫描录音弹窗也改为使用所属窗口的 DOM，兼容 Obsidian 独立窗口。
+- Crisp 系列授权产品名单补齐 Crisp Organize 与 Crisp Base，并更新开发依赖与版本信息。
+
 ## Version 0.4.14
 
 - 设置 → 转写工作流 新增「获取 iPhone 快捷指令」二维码入口：扫码即可把「Crisp 录音」快捷指令添加到 iPhone，替代原来的 obsidian:// 深链接复制按钮。

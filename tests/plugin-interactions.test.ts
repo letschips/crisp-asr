@@ -154,6 +154,28 @@ describe("plugin interaction registration", () => {
       });
     }
   });
+
+  it("lets the stop control cancel a live session that is still connecting", async () => {
+    const plugin = new CrispAsrPlugin(
+      createApp() as never,
+      { id: "crisp-asr" } as never,
+    );
+    const abort = new AbortController();
+    const internal = plugin as unknown as {
+      liveStarting: boolean;
+      liveStartAbort: AbortController | null;
+    };
+    internal.liveStarting = true;
+    internal.liveStartAbort = abort;
+    plugin.uiState.mode = "connecting";
+    plugin.uiState.status = "连接中";
+
+    await plugin.stopLiveTranscription();
+
+    expect(abort.signal.aborted).toBe(true);
+    expect(plugin.uiState.mode).toBe("idle");
+    expect(plugin.uiState.status).toBe("就绪");
+  });
 });
 
 describe("auto-transcribe scope matching", () => {

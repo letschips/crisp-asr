@@ -78,4 +78,22 @@ describe("UntranscribedAudioModal", () => {
       modal.contentEl.querySelectorAll(".crisp-asr-scan-modal__row"),
     ).toHaveLength(1);
   });
+
+  it("creates every control in the modal owner document", () => {
+    const ownerDocument = document.implementation.createHTMLDocument(
+      "ASR popout",
+    );
+    const modal = new UntranscribedAudioModal(
+      {} as never,
+      ["录音/a.m4a"],
+      () => undefined,
+    );
+    modal.contentEl = ownerDocument.createElement("div");
+
+    modal.onOpen();
+
+    for (const element of modal.contentEl.querySelectorAll("*")) {
+      expect(element.ownerDocument).toBe(ownerDocument);
+    }
+  });
 });
