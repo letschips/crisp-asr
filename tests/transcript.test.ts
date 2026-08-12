@@ -5,6 +5,8 @@ import {
   TranscriptAccumulator,
   formatTimestamp,
   renderTranscriptNote,
+  extractSpeakerNumbers,
+  renameSpeakerLabels,
 } from "../src/transcript";
 
 describe("TranscriptAccumulator", () => {
@@ -33,6 +35,19 @@ describe("TranscriptAccumulator", () => {
         },
       ],
     });
+  });
+
+  it("extracts speaker metadata and keeps stable rename markers", () => {
+    const result = extractTranscriptResult({ result: { text: "你好", utterances: [{
+      text: "你好", definite: true, additions: '{"speaker_id":"A"}',
+    }] } });
+    expect(result.utterances?.[0]?.speaker).toBe("A");
+    const note = renderTranscriptNote({
+      title: "访谈", sourcePath: "访谈.m4a", createdAt: "2026-08-12T00:00:00Z",
+      text: "你好", utterances: result.utterances ?? [],
+    });
+    expect(extractSpeakerNumbers(note)).toEqual([1]);
+    expect(renameSpeakerLabels(note, { 1: "主持人" })).toContain("**主持人：** 你好");
   });
 
   it("emits a finalized utterance only once while preserving interim text", () => {

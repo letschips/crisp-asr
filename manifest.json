@@ -1,10 +1,10 @@
 {
   "id": "crisp-asr",
   "name": "Crisp ASR",
-  "version": "0.4.16",
+  "version": "0.5.0",
   "minAppVersion": "1.11.4",
   "description": "Transcribe audio with Doubao ASR, then safely polish or extract notes with your chosen AI.",
-  "author": "letschips",
-  "authorUrl": "https://github.com/letschips",
+  "author": "小红书 letschips",
+  "authorUrl": "https://xhslink.cn/m/3MwtKu4822b",
   "isDesktopOnly": true
 }

@@ -3,6 +3,7 @@ export interface TranscriptUtterance {
   start_time: number;
   end_time: number;
   definite: boolean;
+  speaker?: string;
 }
 
 export interface TranscriptResult {
@@ -14,6 +15,11 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function additionsRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== "string") return asRecord(value);
+  try { return asRecord(JSON.parse(value)); } catch { return {}; }
 }
 
 export function extractTranscriptResult(payload: unknown): TranscriptResult {
@@ -30,11 +36,16 @@ export function extractTranscriptResult(payload: unknown): TranscriptResult {
       if (utteranceText.length === 0) {
         return null;
       }
+      const additions = additionsRecord(item.additions);
+      const speakerValue = item.speaker_id ?? item.speaker ?? additions.speaker_id ?? additions.speaker;
       return {
         text: utteranceText,
         start_time: typeof item.start_time === "number" ? item.start_time : 0,
         end_time: typeof item.end_time === "number" ? item.end_time : 0,
         definite: item.definite === true,
+        ...(typeof speakerValue === "string" || typeof speakerValue === "number"
+          ? { speaker: String(speakerValue) }
+          : {}),
       };
     }).filter((item): item is TranscriptUtterance => item !== null)
     : [];
@@ -131,6 +142,7 @@ export function renderTranscriptNote(input: {
   utterances: TranscriptUtterance[];
   logId?: string;
 }): string {
+  const speakerText = renderSpeakerTranscript(input.utterances);
   const timeline = input.utterances.length > 0
     ? input.utterances.map((utterance) =>
       `- \`${formatTimestamp(utterance.start_time)}\` ${utterance.text}`
@@ -153,7 +165,7 @@ ${logId}---
 
 ## 转写正文
 
-${input.text.trim()}
+${speakerText || input.text.trim()}
 
 ## 时间轴
 
@@ -166,8 +178,40 @@ export function renderLiveTranscriptBlock(input: {
   text: string;
   utterances: TranscriptUtterance[];
   audioPath?: string;
+  body?: string;
 }): string {
   const date = input.startedAt.slice(0, 16).replace("T", " ");
   const audio = input.audioPath ? `![[${input.audioPath}]]\n\n` : "";
-  return `\n\n## 实时转写 · ${date}\n\n${audio}${input.text.trim()}\n`;
+  const speakerText = renderSpeakerTranscript(input.utterances);
+  return `\n\n## 实时转写 · ${date}\n\n${audio}${input.body?.trim() || speakerText || input.text.trim()}\n`;
+}
+
+export function renderSpeakerTranscript(utterances: readonly TranscriptUtterance[]): string {
+  if (!utterances.some((item) => item.speaker !== undefined)) return "";
+  const names = new Map<string, number>();
+  const lines: string[] = [];
+  for (const utterance of utterances) {
+    const id = utterance.speaker ?? "unknown";
+    if (!names.has(id)) names.set(id, names.size + 1);
+    const number = names.get(id)!;
+    lines.push(`<!-- crisp-asr-speaker:${number} -->\n**说话人 ${number}：** ${utterance.text}`);
+  }
+  return lines.join("\n\n");
+}
+
+export function renameSpeakerLabels(markdown: string, names: Record<number, string>): string {
+  return markdown.replace(
+    /<!-- crisp-asr-speaker:(\d+) -->\s*\n\*\*说话人 \1：\*\*/g,
+    (match, raw: string) => {
+      const name = names[Number(raw)]?.trim();
+      return name ? `<!-- crisp-asr-speaker:${raw} -->\n**${name}：**` : match;
+    },
+  );
+}
+
+export function extractSpeakerNumbers(markdown: string): number[] {
+  return [...markdown.matchAll(/<!-- crisp-asr-speaker:(\d+) -->/g)]
+    .map((match) => Number(match[1]))
+    .filter((value, index, values) => Number.isFinite(value) && values.indexOf(value) === index)
+    .sort((left, right) => left - right);
 }

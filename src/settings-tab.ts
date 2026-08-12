@@ -11,6 +11,7 @@ import type { AiProvider } from "./settings";
 import type { SilenceAction, SilenceDurationSeconds } from "./settings";
 import { verifyLicenseCode } from "./license";
 import shortcutQrCode from "./assets/shortcut-qr.png";
+import { DICTATION_PROFILES, type DictationProfileId } from "./dictation-profile";
 
 const CRISP_SHORTCUT_URL =
   "https://www.icloud.com/shortcuts/b5c18553917b4f96bb302f88ccb2f0d4";
@@ -171,6 +172,56 @@ export class CrispAsrSettingTab extends PluginSettingTab {
           }
           await this.plugin.testConnection();
         }));
+
+    const recognition = createSettingGroup(
+      containerEl,
+      "口述场景与识别增强",
+      "用场景、术语和当前笔记上下文提高识别与后续创作质量",
+      true,
+    );
+
+    new Setting(recognition)
+      .setName("默认口述场景")
+      .setDesc("面板中也可在每次开始前切换。")
+      .addDropdown((dropdown) => {
+        for (const profile of DICTATION_PROFILES) dropdown.addOption(profile.id, `${profile.name} · ${profile.description}`);
+        dropdown.setValue(this.plugin.settings.dictationProfileId);
+        dropdown.onChange(async (value) => {
+          await this.plugin.setDictationProfile(value as DictationProfileId);
+          this.display();
+        });
+      });
+
+    if (this.plugin.settings.dictationProfileId === "custom") {
+      new Setting(recognition).setName("自定义场景名称").addText((text) => text
+        .setValue(this.plugin.settings.customProfileName)
+        .onChange(async (value) => { this.plugin.settings.customProfileName = value.trim(); await this.plugin.saveSettings(); }));
+      new Setting(recognition).setName("场景上下文").setDesc("帮助 ASR 理解正在谈论的主题。")
+        .addTextArea((text) => text.setValue(this.plugin.settings.customProfileContext).onChange(async (value) => {
+          this.plugin.settings.customProfileContext = value.trim(); await this.plugin.saveSettings();
+        }));
+      new Setting(recognition).setName("创作要求").setDesc("用于分阶段创作的初稿阶段。")
+        .addTextArea((text) => text.setValue(this.plugin.settings.customCreationPrompt).onChange(async (value) => {
+          this.plugin.settings.customCreationPrompt = value.trim(); await this.plugin.saveSettings();
+        }));
+    }
+
+    new Setting(recognition).setName("本地术语库").setDesc("每行或逗号分隔一个人名、品牌名或专业术语。")
+      .addTextArea((text) => text.setPlaceholder("Crisp ASR\nWireless Mic RX").setValue(this.plugin.settings.hotwordsText).onChange(async (value) => {
+        this.plugin.settings.hotwordsText = value.trim(); await this.plugin.saveSettings();
+      }));
+    new Setting(recognition).setName("火山热词 ID").setDesc("可选：填写控制台中创建的 boosting table ID。")
+      .addText((text) => text.setValue(this.plugin.settings.boostingTableId).onChange(async (value) => {
+        this.plugin.settings.boostingTableId = value.trim(); await this.plugin.saveSettings();
+      }));
+    new Setting(recognition).setName("使用当前笔记上下文").setDesc("开始听写时读取目标笔记标题和开头内容，用于识别上下文；默认关闭。")
+      .addToggle((toggle) => toggle.setValue(this.plugin.settings.useActiveNoteContext).onChange(async (value) => {
+        this.plugin.settings.useActiveNoteContext = value; await this.plugin.saveSettings();
+      }));
+    new Setting(recognition).setName("多人说话人分离").setDesc("文件转写优先使用；实时识别是否返回说话人取决于豆包资源能力。")
+      .addToggle((toggle) => toggle.setValue(this.plugin.settings.identifySpeakers).onChange(async (value) => {
+        this.plugin.settings.identifySpeakers = value; await this.plugin.saveSettings();
+      }));
 
     // -----------------------------------------------------------------
     // 3. AI 文本处理组

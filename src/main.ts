@@ -71,6 +71,10 @@ import {
 } from "./settings";
 import { DoubaoStreamingClient } from "./streaming-client";
 import { SmartProcessingModal } from "./smart-modal";
+import { runCreationWorkflow } from "./creation-workflow";
+import { resolveDictationProfile, type DictationProfileId } from "./dictation-profile";
+import { buildRecognitionEnhancement, type RecognitionEnhancement } from "./recognition-context";
+import { renderMarkedTranscript, type LiveMarker, type LiveMarkerType } from "./live-markers";
 import {
   extractLatestTranscript,
   renderSmartResultNote,
@@ -84,7 +88,11 @@ import {
   renderTranscriptNote,
   TranscriptAccumulator,
   type TranscriptUtterance,
+  extractSpeakerNumbers,
+  renameSpeakerLabels,
+  renderSpeakerTranscript,
 } from "./transcript";
+import { SpeakerRenameModal } from "./speaker-rename-modal";
 
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 
@@ -111,6 +119,7 @@ export interface CrispAsrUiState {
   smartTargetPath: string | null;
   smartMode: "idle" | "processing";
   smartProgress: string;
+  markers: LiveMarker[];
 }
 
 interface LiveSession {
@@ -123,6 +132,7 @@ interface LiveSession {
   startedAtMs: number;
   logId?: string;
   draftId: string;
+  markers: LiveMarker[];
 }
 
 export function findUntranscribedAudio(
@@ -190,6 +200,7 @@ export default class CrispAsrPlugin extends Plugin {
     smartTargetPath: null,
     smartMode: "idle",
     smartProgress: "",
+    markers: [],
   };
 
   private readonly listeners = new Set<() => void>();
@@ -358,6 +369,31 @@ export default class CrispAsrPlugin extends Plugin {
       name: "使用自定义 Prompt 处理当前转写",
       callback: () => void this.startSmartProcessing("custom"),
     });
+    this.addCommand({
+      id: "create-from-current-transcript",
+      name: "从当前转写分阶段创作",
+      callback: () => void this.startCreationWorkflow(),
+    });
+    this.addCommand({
+      id: "rename-speakers",
+      name: "重命名当前转写的说话人",
+      callback: () => void this.renameSpeakersInActiveNote(),
+    });
+    for (const marker of [
+      ["important", "标记重点"],
+      ["paragraph", "标记新段落"],
+      ["question", "标记待确认"],
+    ] as const) {
+      this.addCommand({
+        id: `mark-${marker[0]}`,
+        name: marker[1],
+        checkCallback: (checking) => {
+          const available = this.liveSession !== null;
+          if (available && !checking) void this.addLiveMarker(marker[0]);
+          return available;
+        },
+      });
+    }
     const protocolHandler = (params: ObsidianProtocolData): void => {
       void this.handleProtocolAction(params);
     };
@@ -609,6 +645,81 @@ export default class CrispAsrPlugin extends Plugin {
     });
     this.smartModal = modal;
     modal.open();
+  }
+
+  async startCreationWorkflow(): Promise<void> {
+    if (!(await this.ensureLicenseActivated())) return;
+    if (this.uiState.smartMode === "processing") {
+      new Notice("Crisp ASR：已有智能处理任务正在运行");
+      return;
+    }
+    const apiKey = this.getAiApiKey();
+    if (!apiKey) return this.showMissingAiKey();
+    const target = await this.findSmartTarget();
+    if (!target) {
+      new Notice("请先打开一篇包含 Crisp ASR 转写内容的笔记", 6_000);
+      return;
+    }
+    const profile = this.currentDictationProfile();
+    this.smartModal?.close();
+    const modal = new SmartProcessingModal(this.app, {
+      title: `${profile.name} · 分阶段创作`,
+      original: target.transcript,
+      run: async ({ signal, onProgress }) => {
+        this.uiState.smartMode = "processing";
+        this.emit();
+        try {
+          return await runCreationWorkflow({
+            transcript: target.transcript,
+            profile,
+            customInstruction: this.settings.customCreationPrompt,
+            signal,
+            onProgress: (current, total, label) => {
+              this.uiState.smartProgress = `${label} · ${Math.min(current, total)}/${total}`;
+              this.emit();
+              onProgress(current, total, label);
+            },
+            generate: (prompts) => requestAiText({
+              provider: this.settings.aiProvider,
+              apiKey,
+              model: this.settings.aiModel,
+              baseUrl: this.settings.aiBaseUrl,
+              systemPrompt: prompts.systemPrompt,
+              userPrompt: prompts.userPrompt,
+            }, (request) => this.sendAiHttpRequest(request)),
+          });
+        } finally {
+          this.uiState.smartMode = "idle";
+          this.uiState.smartProgress = "";
+          this.emit();
+        }
+      },
+      apply: (result) => this.writeSmartResult(
+        target.file,
+        target.transcript,
+        result,
+        `${profile.name} · 分阶段创作`,
+      ),
+    });
+    this.smartModal = modal;
+    modal.open();
+  }
+
+  async renameSpeakersInActiveNote(): Promise<void> {
+    const file = this.app.workspace.getActiveFile();
+    if (!(file instanceof TFile) || file.extension !== "md") {
+      new Notice("请先打开包含说话人分离结果的转写笔记");
+      return;
+    }
+    const markdown = await this.app.vault.cachedRead(file);
+    const speakers = extractSpeakerNumbers(markdown);
+    if (speakers.length === 0) {
+      new Notice("当前笔记没有可重命名的说话人标记");
+      return;
+    }
+    new SpeakerRenameModal(this.app, speakers, async (names) => {
+      await this.app.vault.process(file, (content) => renameSpeakerLabels(content, names));
+    }).open();
   }
 
   async refreshMicrophones(requestPermission = true): Promise<void> {
@@ -894,7 +1005,11 @@ export default class CrispAsrPlugin extends Plugin {
         false,
       );
     }
-    const result = await transcribeFlash(apiKey, audio);
+    const result = await transcribeFlash(
+      apiKey,
+      audio,
+      await this.buildRecognition(target, false),
+    );
     const output = await this.writeFileTranscript(source, target, result);
     this.uiState.smartTargetPath = output.path;
     this.emit();
@@ -930,12 +1045,14 @@ export default class CrispAsrPlugin extends Plugin {
     const target = this.app.workspace.getActiveViewOfType(MarkdownView)?.file
       ?? null;
     const startedAt = new Date().toISOString();
+    const recognition = await this.buildRecognition(target, true);
     let sessionLogId: string | undefined;
     let startupError: Error | null = null;
     let inputEndedDuringStartup = false;
     const client = new DoubaoStreamingClient({
       apiKey,
       resourceId: this.settings.liveResourceId,
+      recognition,
       onPayload: (payload) => {
         const result = extractTranscriptResult(payload);
         const update = accumulator.consume(result);
@@ -1035,6 +1152,7 @@ export default class CrispAsrPlugin extends Plugin {
       status: "连接中",
       preview: "",
       finalized: [],
+      markers: [],
       targetPath: target?.path ?? null,
       inputLevel: 0,
     };
@@ -1055,6 +1173,7 @@ export default class CrispAsrPlugin extends Plugin {
         startedAt,
         startedAtMs: Date.now(),
         draftId: randomUUID(),
+        markers: [],
         ...(sessionLogId ? { logId: sessionLogId } : {}),
       };
       this.settings.liveDraft = {
@@ -1063,6 +1182,7 @@ export default class CrispAsrPlugin extends Plugin {
         targetPath: target?.path ?? null,
         utterances: accumulator.utterances(),
         preview: this.uiState.preview,
+        markers: [],
         updatedAt: Date.now(),
       };
       this.uiState.recoveryDraft = null;
@@ -1193,8 +1313,27 @@ export default class CrispAsrPlugin extends Plugin {
       ...this.settings.liveDraft,
       utterances: session.accumulator.utterances(),
       preview: this.uiState.preview,
+      markers: session.markers,
       updatedAt: Date.now(),
     };
+  }
+
+  async addLiveMarker(type: LiveMarkerType): Promise<void> {
+    const session = this.liveSession;
+    if (!session || this.uiState.mode !== "listening") return;
+    const marker: LiveMarker = {
+      id: randomUUID(),
+      type,
+      utteranceIndex: session.accumulator.utterances().length,
+      atMs: Date.now() - session.startedAtMs,
+    };
+    session.markers.push(marker);
+    this.uiState.markers = [...session.markers];
+    this.updateLiveDraft(session);
+    await this.persistLiveDraft();
+    this.emit();
+    const label = type === "important" ? "重点" : type === "paragraph" ? "新段落" : "待确认";
+    new Notice(`Crisp ASR：已标记${label}`);
   }
 
   private scheduleLiveDraftCheckpoint(session: LiveSession): void {
@@ -1310,6 +1449,44 @@ export default class CrispAsrPlugin extends Plugin {
       return null;
     }
     return this.app.secretStorage.getSecret(secretName)?.trim() || null;
+  }
+
+  async setDictationProfile(id: DictationProfileId): Promise<void> {
+    this.settings.dictationProfileId = id;
+    await this.persistSettings();
+    this.emit();
+  }
+
+  private currentDictationProfile() {
+    return resolveDictationProfile({
+      id: this.settings.dictationProfileId,
+      customName: this.settings.customProfileName,
+      customContext: this.settings.customProfileContext,
+      customInstruction: this.settings.customCreationPrompt,
+    });
+  }
+
+  private async buildRecognition(
+    target: TFile | null | undefined,
+    live: boolean,
+  ): Promise<RecognitionEnhancement> {
+    let noteContext = "";
+    if (this.settings.useActiveNoteContext && target?.extension === "md") {
+      try {
+        const content = await this.app.vault.cachedRead(target);
+        noteContext = `${target.basename}\n${content.slice(0, 3_000)}`;
+      } catch {
+        noteContext = target.basename;
+      }
+    }
+    return buildRecognitionEnhancement({
+      hotwordsText: this.settings.hotwordsText,
+      boostingTableId: this.settings.boostingTableId,
+      profileContext: this.currentDictationProfile().context,
+      noteContext,
+      live,
+      identifySpeakers: this.settings.identifySpeakers,
+    });
   }
 
   private showMissingKey(): void {
@@ -1488,8 +1665,10 @@ export default class CrispAsrPlugin extends Plugin {
     },
   ): Promise<TFile> {
     if (this.settings.outputMode === "current-note" && target) {
+      const transcriptBody = renderSpeakerTranscript(result.utterances)
+        || result.text.trim();
       const block = `\n\n## 音频转写 · ${source.basename}\n\n![[${source.path}]]\n\n${
-        result.text.trim()
+        transcriptBody
       }\n`;
       await this.app.vault.process(target, (content) => content + block);
       return target;
@@ -1522,6 +1701,10 @@ export default class CrispAsrPlugin extends Plugin {
       startedAt: session.startedAt,
       text,
       utterances: session.accumulator.utterances(),
+      body: renderMarkedTranscript(
+        session.accumulator.utterances().map((utterance) => utterance.text),
+        session.markers,
+      ),
       ...(audioPath ? { audioPath } : {}),
     });
     if (session.target) {

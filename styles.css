@@ -197,6 +197,34 @@
   gap: 10px;
 }
 
+.crisp-asr-profile-field {
+  margin-bottom: 10px;
+}
+
+.crisp-asr-profile,
+.crisp-asr-profile-field select {
+  width: 100%;
+}
+
+.crisp-asr-marker-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.crisp-asr-speaker-rename__row {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.35fr) 1fr;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.crisp-asr-speaker-rename__row input {
+  width: 100%;
+}
+
 .crisp-asr-field {
   display: grid;
   min-width: 0;

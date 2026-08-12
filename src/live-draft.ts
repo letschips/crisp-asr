@@ -1,4 +1,6 @@
 import type { TranscriptUtterance } from "./transcript";
+import { normalizeLiveMarkers, type LiveMarker } from "./live-markers";
+import { renderMarkedTranscript } from "./live-markers";
 
 export interface PersistedLiveDraft {
   id: string;
@@ -6,6 +8,7 @@ export interface PersistedLiveDraft {
   targetPath: string | null;
   utterances: TranscriptUtterance[];
   preview: string;
+  markers?: LiveMarker[];
   updatedAt: number;
 }
 
@@ -27,6 +30,7 @@ function cleanUtterances(value: unknown): TranscriptUtterance[] {
       start_time: typeof item.start_time === "number" ? item.start_time : 0,
       end_time: typeof item.end_time === "number" ? item.end_time : 0,
       definite: true,
+      ...(typeof item.speaker === "string" ? { speaker: item.speaker } : {}),
     }];
   });
 }
@@ -54,14 +58,16 @@ export function normalizeLiveDraft(value: unknown): PersistedLiveDraft | null {
   if (!id || !startedAt || updatedAt <= 0 || (utterances.length === 0 && !preview)) {
     return null;
   }
-  return { id, startedAt, targetPath, utterances, preview, updatedAt };
+  const markers = normalizeLiveMarkers(candidate.markers);
+  return { id, startedAt, targetPath, utterances, preview, updatedAt, ...(markers.length ? { markers } : {}) };
 }
 
 export function renderRecoveredTranscript(draft: PersistedLiveDraft): string {
-  const text = [
+  const lines = [
     ...draft.utterances.map((utterance) => utterance.text),
     ...(draft.preview ? [draft.preview] : []),
-  ].join("\n").trim();
+  ];
+  const text = renderMarkedTranscript(lines, draft.markers ?? []);
   const date = draft.startedAt.slice(0, 16).replace("T", " ");
   return `\n\n## 恢复的实时转写 · ${date}\n\n${text}\n`;
 }

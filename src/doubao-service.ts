@@ -6,6 +6,7 @@ import {
   type FlashResponse,
 } from "./flash-client";
 import { toAsrServiceError } from "./service-error";
+import type { RecognitionEnhancement } from "./recognition-context";
 
 const FLASH_URL =
   "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash";
@@ -14,6 +15,7 @@ const FLASH_RESOURCE_ID = "volc.bigasr.auc_turbo";
 export async function transcribeFlash(
   apiKey: string,
   audio: ArrayBuffer,
+  recognition?: RecognitionEnhancement,
 ): Promise<FlashResponse> {
   const base64 = Buffer.from(audio).toString("base64");
   let response;
@@ -28,7 +30,11 @@ export async function transcribeFlash(
         "X-Api-Request-Id": randomUUID(),
         "X-Api-Sequence": "-1",
       },
-      body: JSON.stringify(buildFlashRequest(base64, "crisp-asr-desktop")),
+      body: JSON.stringify(buildFlashRequest(
+        base64,
+        "crisp-asr-desktop",
+        recognition,
+      )),
       throw: false,
     });
   } catch (error) {

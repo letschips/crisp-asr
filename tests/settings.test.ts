@@ -23,6 +23,33 @@ describe("settings normalization", () => {
     expect(DEFAULT_SETTINGS.fileJobs).toEqual([]);
     expect(DEFAULT_SETTINGS.silenceAction).toBe("warn");
     expect(DEFAULT_SETTINGS.silenceDurationSeconds).toBe(60);
+    expect(DEFAULT_SETTINGS.dictationProfileId).toBe("free");
+    expect(DEFAULT_SETTINGS.hotwordsText).toBe("");
+    expect(DEFAULT_SETTINGS.boostingTableId).toBe("");
+    expect(DEFAULT_SETTINGS.useActiveNoteContext).toBe(false);
+    expect(DEFAULT_SETTINGS.identifySpeakers).toBe(false);
+  });
+
+  it("normalizes creation profile and recognition enhancement settings", () => {
+    expect(normalizeSettings({
+      dictationProfileId: "video",
+      customProfileName: " 复盘 ",
+      customProfileContext: " 产品会议 ",
+      customCreationPrompt: " 输出行动项 ",
+      hotwordsText: " Obsidian\nCrisp ASR ",
+      boostingTableId: " table-1 ",
+      useActiveNoteContext: true,
+      identifySpeakers: true,
+    })).toMatchObject({
+      dictationProfileId: "video",
+      customProfileName: "复盘",
+      customProfileContext: "产品会议",
+      customCreationPrompt: "输出行动项",
+      hotwordsText: "Obsidian\nCrisp ASR",
+      boostingTableId: "table-1",
+      useActiveNoteContext: true,
+      identifySpeakers: true,
+    });
   });
 
   it("normalizes supported silence protection values", () => {

@@ -6,6 +6,7 @@ import {
 import type CrispAsrPlugin from "./main";
 import type { PersistedFileJob } from "./settings";
 import type { PersistedLiveDraft } from "./live-draft";
+import { DICTATION_PROFILES } from "./dictation-profile";
 
 export const CRISP_ASR_VIEW_TYPE = "crisp-asr";
 
@@ -27,6 +28,8 @@ interface ViewSnapshot {
   smartProgress: string;
   elapsed: string;
   recoveryDraft: PersistedLiveDraft | null;
+  dictationProfileId: string;
+  markers: readonly unknown[];
 }
 
 function formatJobMessage(job: PersistedFileJob): string {
@@ -139,6 +142,8 @@ export class CrispAsrView extends ItemView {
         ? this.plugin.formatElapsed()
         : "",
       recoveryDraft: state.recoveryDraft,
+      dictationProfileId: this.plugin.settings.dictationProfileId,
+      markers: state.markers,
     };
   }
 
@@ -158,7 +163,9 @@ export class CrispAsrView extends ItemView {
       && left.smartTargetPath === right.smartTargetPath
       && left.smartMode === right.smartMode
       && left.smartProgress === right.smartProgress
-      && left.recoveryDraft === right.recoveryDraft;
+      && left.recoveryDraft === right.recoveryDraft
+      && left.dictationProfileId === right.dictationProfileId
+      && left.markers === right.markers;
   }
 
   private update(): void {
@@ -304,6 +311,27 @@ export class CrispAsrView extends ItemView {
     const locked = state.mode !== "idle" && state.mode !== "error";
     const testingMicrophone = state.microphoneTestMode === "testing";
 
+    const profileField = document.createElement("label");
+    profileField.className = "crisp-asr-field crisp-asr-profile-field";
+    const profileLabel = document.createElement("span");
+    profileLabel.className = "crisp-asr-field__header";
+    profileLabel.textContent = "口述场景";
+    const profileSelect = document.createElement("select");
+    profileSelect.className = "crisp-asr-profile dropdown";
+    profileSelect.disabled = locked;
+    for (const profile of DICTATION_PROFILES) {
+      const option = document.createElement("option");
+      option.value = profile.id;
+      option.textContent = profile.name;
+      profileSelect.append(option);
+    }
+    profileSelect.value = this.plugin.settings.dictationProfileId;
+    profileSelect.addEventListener("change", () => {
+      void this.plugin.setDictationProfile(profileSelect.value as typeof this.plugin.settings.dictationProfileId);
+    });
+    profileField.append(profileLabel, profileSelect);
+    sourceControls.append(profileField);
+
     const microphoneField = document.createElement("label");
     microphoneField.className = "crisp-asr-field crisp-asr-microphone-field";
     const microphoneHeader = document.createElement("span");
@@ -403,6 +431,15 @@ export class CrispAsrView extends ItemView {
     );
     controls.append(controlTitle, sourceControls, actionRow);
 
+    if (state.mode === "listening") {
+      const markers = document.createElement("div");
+      markers.className = "crisp-asr-marker-actions";
+      createButton(markers, "重点", "star", "is-secondary", () => void this.plugin.addLiveMarker("important"));
+      createButton(markers, "新段落", "pilcrow", "is-secondary", () => void this.plugin.addLiveMarker("paragraph"));
+      createButton(markers, "待确认", "circle-help", "is-secondary", () => void this.plugin.addLiveMarker("question"));
+      controls.append(markers);
+    }
+
     const transcript = document.createElement("section");
     transcript.className = "crisp-asr-card crisp-asr-transcript";
     const transcriptHeading = document.createElement("div");
@@ -463,6 +500,14 @@ export class CrispAsrView extends ItemView {
     smartActions.className = "crisp-asr-smart-actions";
     const smartDisabled = !state.smartTargetPath
       || state.smartMode === "processing";
+    createButton(
+      smartActions,
+      "分阶段创作",
+      "workflow",
+      "is-primary",
+      () => void this.plugin.startCreationWorkflow(),
+      smartDisabled,
+    );
     createButton(
       smartActions,
       "润色整理",

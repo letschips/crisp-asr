@@ -44,6 +44,17 @@ describe("Doubao flash transcription", () => {
     });
   });
 
+  it("preserves speaker metadata returned by file transcription", () => {
+    const result = parseFlashResponse({
+      status: 200,
+      headers: { "x-api-status-code": "20000000" },
+      json: { result: { text: "你好", utterances: [{
+        text: "你好", additions: { speaker_id: "guest" },
+      }] } },
+    });
+    expect(result.utterances[0]?.speaker).toBe("guest");
+  });
+
   it("surfaces the service code and log ID when recognition fails", () => {
     try {
       parseFlashResponse({

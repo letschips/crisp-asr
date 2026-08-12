@@ -1,10 +1,14 @@
-import type { TranscriptUtterance } from "./transcript";
+import { extractTranscriptResult, type TranscriptUtterance } from "./transcript";
 import { encodePcm16Wav } from "./audio";
 import {
   AsrServiceError,
   isRetryableHttpStatus,
   isRetryableServiceCode,
 } from "./service-error";
+import {
+  recognitionRequestFields,
+  type RecognitionEnhancement,
+} from "./recognition-context";
 
 export interface FlashResponse {
   text: string;
@@ -40,6 +44,7 @@ export async function runConnectionProbe(
 export function buildFlashRequest(
   base64Audio: string,
   uid: string,
+  recognition?: RecognitionEnhancement,
 ): unknown {
   return {
     user: { uid },
@@ -50,6 +55,7 @@ export function buildFlashRequest(
       enable_punc: true,
       enable_ddc: true,
       show_utterances: true,
+      ...recognitionRequestFields(recognition, false),
     },
   };
 }
@@ -60,12 +66,6 @@ function normalizedHeaders(
   return Object.fromEntries(
     Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]),
   );
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
 }
 
 export function parseFlashResponse(response: {
@@ -91,28 +91,11 @@ export function parseFlashResponse(response: {
     );
   }
 
-  const json = asRecord(response.json);
-  const resultValue = Array.isArray(json.result)
-    ? json.result[0]
-    : json.result;
-  const result = asRecord(resultValue);
-  const text = typeof result.text === "string" ? result.text.trim() : "";
-  const utterances = Array.isArray(result.utterances)
-    ? result.utterances.map((candidate): TranscriptUtterance | null => {
-      const item = asRecord(candidate);
-      const utteranceText = typeof item.text === "string"
-        ? item.text.trim()
-        : "";
-      if (utteranceText.length === 0) {
-        return null;
-      }
-      return {
-        text: utteranceText,
-        start_time: typeof item.start_time === "number" ? item.start_time : 0,
-        end_time: typeof item.end_time === "number" ? item.end_time : 0,
-        definite: true,
-      };
-    }).filter((item): item is TranscriptUtterance => item !== null)
-    : [];
+  const extracted = extractTranscriptResult(response.json);
+  const text = extracted.text;
+  const utterances = (extracted.utterances ?? []).map((utterance) => ({
+    ...utterance,
+    definite: true,
+  }));
   return { text, utterances, ...(logId ? { logId } : {}) };
 }

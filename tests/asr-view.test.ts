@@ -9,6 +9,7 @@ function plugin(overrides: Record<string, unknown> = {}): Record<string, unknown
       microphoneDeviceId: "bluetooth",
       saveLiveAudio: true,
       aiProvider: "ark",
+      dictationProfileId: "free",
     },
     uiState: {
       mode: "idle",
@@ -28,6 +29,7 @@ function plugin(overrides: Record<string, unknown> = {}): Record<string, unknown
       activeMicrophoneLabel: "",
       microphoneTestMode: "idle",
       recoveryDraft: null,
+      markers: [],
       jobs: [],
     },
     subscribe: () => () => undefined,
@@ -45,6 +47,9 @@ function plugin(overrides: Record<string, unknown> = {}): Record<string, unknown
     removeFileJob: async () => undefined,
     openFileJobResult: async () => undefined,
     startSmartProcessing: async () => undefined,
+    startCreationWorkflow: async () => undefined,
+    setDictationProfile: async () => undefined,
+    addLiveMarker: async () => undefined,
     ...overrides,
   };
 }
@@ -397,6 +402,7 @@ describe("Crisp ASR view controls", () => {
   it("offers manual polish, extraction and custom processing for a finished transcript", async () => {
     const calls: string[] = [];
     const instance = plugin({
+      startCreationWorkflow: async () => { calls.push("creation"); },
       startSmartProcessing: async (mode: string) => {
         calls.push(mode);
       },
@@ -416,6 +422,7 @@ describe("Crisp ASR view controls", () => {
       card?.querySelectorAll<HTMLButtonElement>("button") ?? [],
     );
     expect(buttons.map((button) => button.textContent)).toEqual([
+      "分阶段创作",
       "润色整理",
       "重点提炼",
       "自定义",
@@ -424,7 +431,7 @@ describe("Crisp ASR view controls", () => {
       button.click();
     }
     await Promise.resolve();
-    expect(calls).toEqual(["polish", "extract", "custom"]);
+    expect(calls).toEqual(["creation", "polish", "extract", "custom"]);
   });
 
   it("disables smart processing until a transcript note is available", async () => {

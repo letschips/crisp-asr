@@ -54,6 +54,7 @@ export interface DoubaoStreamingClientOptions {
   onLogId?: (logId: string) => void;
   onReconnecting?: () => void;
   onReconnected?: () => void;
+  recognition?: import("./recognition-context").RecognitionEnhancement;
 }
 
 const STREAM_URL =
@@ -201,6 +202,7 @@ export class DoubaoStreamingClient {
         enable_ddc: true,
         show_utterances: true,
         result_type: "full",
+        ...recognitionRequestFields(this.options.recognition, true),
       },
     }));
   }
@@ -353,3 +355,4 @@ import {
   buildFullClientRequest,
   parseServerFrame,
 } from "./doubao-protocol";
+import { recognitionRequestFields } from "./recognition-context";

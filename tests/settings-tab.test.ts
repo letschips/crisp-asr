@@ -112,7 +112,7 @@ describe("AI text processing settings", () => {
     expect(tab.containerEl.textContent).toContain("AI API Key");
     expect(tab.containerEl.textContent).toContain("AI 模型");
     expect(tab.containerEl.textContent).toContain("结果写入方式");
-    expect(tab.containerEl.querySelector("textarea")?.value).toBe(
+    expect(tab.containerEl.querySelector<HTMLTextAreaElement>("textarea.crisp-asr-custom-prompt")?.value).toBe(
       "按 {{transcript}} 整理",
     );
   });

@@ -2,6 +2,10 @@ import {
   normalizeLiveDraft,
   type PersistedLiveDraft,
 } from "./live-draft";
+import {
+  normalizeDictationProfileId,
+  type DictationProfileId,
+} from "./dictation-profile";
 
 export type AiProvider =
   | "ark"
@@ -58,6 +62,14 @@ export interface CrispAsrSettings {
   silenceAction: SilenceAction;
   silenceDurationSeconds: SilenceDurationSeconds;
   liveDraft: PersistedLiveDraft | null;
+  dictationProfileId: DictationProfileId;
+  customProfileName: string;
+  customProfileContext: string;
+  customCreationPrompt: string;
+  hotwordsText: string;
+  boostingTableId: string;
+  useActiveNoteContext: boolean;
+  identifySpeakers: boolean;
   fileJobs: PersistedFileJob[];
   licenseCode: string;
 }
@@ -83,6 +95,14 @@ export const DEFAULT_SETTINGS: CrispAsrSettings = {
   silenceAction: "warn",
   silenceDurationSeconds: 60,
   liveDraft: null,
+  dictationProfileId: "free",
+  customProfileName: "",
+  customProfileContext: "",
+  customCreationPrompt: "",
+  hotwordsText: "",
+  boostingTableId: "",
+  useActiveNoteContext: false,
+  identifySpeakers: false,
   fileJobs: [],
   licenseCode: "",
 };
@@ -254,6 +274,16 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
       ? candidate.silenceDurationSeconds
       : 60,
     liveDraft: normalizeLiveDraft(candidate.liveDraft),
+    dictationProfileId: normalizeDictationProfileId(candidate.dictationProfileId),
+    customProfileName: cleanText(candidate.customProfileName),
+    customProfileContext: cleanText(candidate.customProfileContext),
+    customCreationPrompt: cleanText(candidate.customCreationPrompt),
+    hotwordsText: typeof candidate.hotwordsText === "string"
+      ? candidate.hotwordsText.trim()
+      : "",
+    boostingTableId: cleanText(candidate.boostingTableId),
+    useActiveNoteContext: candidate.useActiveNoteContext === true,
+    identifySpeakers: candidate.identifySpeakers === true,
     fileJobs: normalizeFileJobs(candidate.fileJobs),
     licenseCode: cleanText(candidate.licenseCode),
   };
