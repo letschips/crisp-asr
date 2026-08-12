@@ -21,10 +21,29 @@ describe("settings normalization", () => {
     expect(DEFAULT_SETTINGS.saveLiveAudio).toBe(false);
     expect(DEFAULT_SETTINGS.liveAudioFolder).toBe("Crisp ASR/Audio");
     expect(DEFAULT_SETTINGS.fileJobs).toEqual([]);
+    expect(DEFAULT_SETTINGS.silenceAction).toBe("warn");
+    expect(DEFAULT_SETTINGS.silenceDurationSeconds).toBe(60);
+  });
+
+  it("normalizes supported silence protection values", () => {
+    expect(normalizeSettings({
+      silenceAction: "stop",
+      silenceDurationSeconds: 120,
+    })).toMatchObject({
+      silenceAction: "stop",
+      silenceDurationSeconds: 120,
+    });
+    expect(normalizeSettings({
+      silenceAction: "off",
+      silenceDurationSeconds: 45,
+    })).toMatchObject({
+      silenceAction: "off",
+      silenceDurationSeconds: 60,
+    });
   });
 
   it("drops malformed persisted settings and bounds processed audio history", () => {
-    const history = Array.from({ length: 620 }, (_, index) => `a-${index}.m4a`);
+    const history = Array.from({ length: 5_200 }, (_, index) => `a-${index}.m4a`);
     const settings = normalizeSettings({
       apiKeySecretName: "doubao",
       outputFolder: " /Crisp ASR// ",
@@ -43,10 +62,31 @@ describe("settings normalization", () => {
     expect(settings.liveResourceId).toBe(
       "volc.seedasr.sauc.duration",
     );
-    expect(settings.processedAudioPaths).toHaveLength(500);
+    expect(settings.processedAudioPaths).toHaveLength(5_000);
+    expect(settings.processedAudioPaths[0]).toBe("a-200.m4a");
     expect(
       settings.processedAudioPaths[settings.processedAudioPaths.length - 1],
-    ).toBe("a-619.m4a");
+    ).toBe("a-5199.m4a");
+  });
+
+  it("keeps a valid live recovery draft and drops an empty one", () => {
+    const draft = {
+      id: "draft-1",
+      startedAt: "2026-08-12T08:00:00.000Z",
+      targetPath: null,
+      utterances: [{
+        text: "口述内容",
+        start_time: 0,
+        end_time: 500,
+        definite: true,
+      }],
+      preview: "",
+      updatedAt: 123,
+    };
+    expect(normalizeSettings({ liveDraft: draft }).liveDraft).toEqual(draft);
+    expect(normalizeSettings({
+      liveDraft: { ...draft, utterances: [] },
+    }).liveDraft).toBeNull();
   });
 
   it("normalizes live input and recording settings", () => {

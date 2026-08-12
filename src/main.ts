@@ -27,8 +27,9 @@ import { decodeAudioToPcmWav, isAudioPath, needsTranscoding } from "./audio";
 import { LivePcmCapture } from "./audio-capture";
 import {
   listMicrophoneDevices,
+  microphoneAvailability,
   preservePreferredMicrophone,
-  resolveMicrophoneDeviceId,
+  subscribeToMicrophoneChanges,
   type MicrophoneDevice,
 } from "./audio-input";
 import {
@@ -53,6 +54,13 @@ import {
   startLiveResources,
 } from "./live-session";
 import { CrispAsrLiveStrip } from "./live-strip";
+import {
+  SerializedPersistence,
+  renderRecoveredTranscript,
+  shouldCheckpointDraft,
+  type PersistedLiveDraft,
+} from "./live-draft";
+import { MicrophoneTestSession } from "./microphone-test";
 import { AsrServiceError, toAsrServiceError } from "./service-error";
 import { CrispAsrSettingTab } from "./settings-tab";
 import {
@@ -95,6 +103,10 @@ export interface CrispAsrUiState {
   targetPath: string | null;
   jobs: PersistedFileJob[];
   microphones: MicrophoneDevice[];
+  microphoneWarning: string;
+  activeMicrophoneLabel: string;
+  microphoneTestMode: "idle" | "testing";
+  recoveryDraft: PersistedLiveDraft | null;
   inputLevel: number;
   smartTargetPath: string | null;
   smartMode: "idle" | "processing";
@@ -110,6 +122,7 @@ interface LiveSession {
   startedAt: string;
   startedAtMs: number;
   logId?: string;
+  draftId: string;
 }
 
 export function findUntranscribedAudio(
@@ -127,6 +140,36 @@ export function findUntranscribedAudio(
     .sort((left, right) => left.localeCompare(right));
 }
 
+function sourceAudioPath(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  const wikiLink = trimmed.match(/^!?\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]$/);
+  const path = (wikiLink?.[1] ?? trimmed).trim();
+  return isAudioPath(path) ? path : null;
+}
+
+export function collectTranscribedAudioPaths<TFileLike extends { path: string }>(
+  metadataCache: {
+    getFileCache: (file: TFileLike) => {
+      frontmatter?: Record<string, unknown>;
+    } | null;
+  },
+  markdownFiles: readonly TFileLike[],
+): Set<string> {
+  const paths = new Set<string>();
+  for (const file of markdownFiles) {
+    const path = sourceAudioPath(
+      metadataCache.getFileCache(file)?.frontmatter?.source_audio,
+    );
+    if (path) {
+      paths.add(path);
+    }
+  }
+  return paths;
+}
+
 export default class CrispAsrPlugin extends Plugin {
   settings: CrispAsrSettings = { ...DEFAULT_SETTINGS };
   uiState: CrispAsrUiState = {
@@ -139,6 +182,10 @@ export default class CrispAsrPlugin extends Plugin {
     microphones: [
       { deviceId: "default", label: "系统默认" },
     ],
+    microphoneWarning: "",
+    activeMicrophoneLabel: "",
+    microphoneTestMode: "idle",
+    recoveryDraft: null,
     inputLevel: 0,
     smartTargetPath: null,
     smartMode: "idle",
@@ -158,6 +205,15 @@ export default class CrispAsrPlugin extends Plugin {
   private liveStrip: CrispAsrLiveStrip | null = null;
   private smartModal: SmartProcessingModal | null = null;
   private unloaded = false;
+  private unsubscribeMicrophoneChanges: (() => void) | null = null;
+  private microphoneTest: MicrophoneTestSession | null = null;
+  private readonly persistence = new SerializedPersistence<CrispAsrSettings>(
+    (settings) => this.saveData(settings),
+  );
+  private draftCheckpointTimer: number | null = null;
+  private lastDraftPersistedAt = 0;
+  private draftPersistenceWarned = false;
+  private restoringDraftId: string | null = null;
 
   async onload(): Promise<void> {
     this.unloaded = false;
@@ -176,6 +232,18 @@ export default class CrispAsrPlugin extends Plugin {
       ? { ...legacy, liveResourceId: legacyResourceId }
       : persistedSettings;
     this.settings = normalizeSettings(settingsInput);
+    this.uiState.recoveryDraft = this.settings.liveDraft;
+    const mediaDevices = window.navigator.mediaDevices;
+    if (mediaDevices) {
+      this.unsubscribeMicrophoneChanges = subscribeToMicrophoneChanges(
+        mediaDevices,
+        () => {
+          void this.stopMicrophoneTest();
+          void this.refreshMicrophones(false);
+        },
+      );
+      void this.refreshMicrophones(false);
+    }
     let migratedLegacySettings = Boolean(
       legacyResourceId && !hasCurrentResourceId,
     );
@@ -191,7 +259,7 @@ export default class CrispAsrPlugin extends Plugin {
       migratedLegacySettings = true;
     }
     if (migratedLegacySettings) {
-      await this.saveData(this.settings);
+      await this.persistSettings();
     }
     this.uiState.jobs = this.settings.fileJobs;
     for (const job of this.settings.fileJobs) {
@@ -201,7 +269,7 @@ export default class CrispAsrPlugin extends Plugin {
       run: (job) => this.runFileJob(job),
       persist: async (jobs) => {
         this.settings.fileJobs = jobs;
-        await this.saveData(this.settings);
+        await this.persistSettings();
       },
       createId: () => randomUUID(),
       onChange: (jobs) => this.handleQueueChange(jobs),
@@ -341,6 +409,9 @@ export default class CrispAsrPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.unloaded = true;
+    this.unsubscribeMicrophoneChanges?.();
+    this.unsubscribeMicrophoneChanges = null;
+    await this.stopMicrophoneTest();
     this.liveStartAbort?.abort();
     this.liveStartAbort = null;
     this.fileQueue?.stop();
@@ -349,8 +420,9 @@ export default class CrispAsrPlugin extends Plugin {
     }
     this.autoTimers.clear();
     const session = this.liveSession;
-    this.liveSession = null;
     if (session) {
+      await this.flushLiveDraft(session).catch(() => undefined);
+      this.liveSession = null;
       session.recorder?.abort();
       await closeLiveResources(session);
     }
@@ -384,11 +456,15 @@ export default class CrispAsrPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     this.settings = normalizeSettings(this.settings);
-    await this.saveData(this.settings);
+    await this.persistSettings();
     if (this.getApiKey()) {
       void this.fileQueue?.start();
     }
     this.emit();
+  }
+
+  private persistSettings(): Promise<void> {
+    return this.persistence.enqueue(this.settings);
   }
 
   formatElapsed(): string {
@@ -551,25 +627,19 @@ export default class CrispAsrPlugin extends Plugin {
         }
       }
       const listed = await listMicrophoneDevices(mediaDevices);
-      const microphones = requestPermission
-        ? listed
-        : preservePreferredMicrophone(
-          listed,
-          this.settings.microphoneDeviceId,
-        );
+      const availability = microphoneAvailability(
+        this.settings.microphoneDeviceId,
+        listed,
+      );
+      const microphones = preservePreferredMicrophone(
+        listed,
+        this.settings.microphoneDeviceId,
+      );
       this.uiState.microphones = microphones;
-      const resolved = requestPermission
-        ? resolveMicrophoneDeviceId(
-          this.settings.microphoneDeviceId,
-          microphones,
-        )
-        : this.settings.microphoneDeviceId;
-      if (requestPermission && resolved !== this.settings.microphoneDeviceId) {
-        this.settings.microphoneDeviceId = resolved;
-        await this.saveSettings();
-      } else {
-        this.emit();
-      }
+      this.uiState.microphoneWarning = availability === "missing"
+        ? "已选麦克风当前不可用，开始时将使用系统默认"
+        : "";
+      this.emit();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`Crisp ASR 无法读取麦克风：${message}`, 8_000);
@@ -577,8 +647,70 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async setMicrophoneDevice(deviceId: string): Promise<void> {
+    await this.stopMicrophoneTest();
     this.settings.microphoneDeviceId = deviceId || "default";
     await this.saveSettings();
+  }
+
+  async toggleMicrophoneTest(): Promise<void> {
+    if (this.microphoneTest?.active) {
+      await this.stopMicrophoneTest();
+      return;
+    }
+    if (this.liveSession || this.liveStarting) {
+      new Notice("请先结束实时听写再测试麦克风");
+      return;
+    }
+    const session = new MicrophoneTestSession(window);
+    this.microphoneTest = session;
+    this.uiState.microphoneTestMode = "testing";
+    this.uiState.activeMicrophoneLabel = "正在连接所选麦克风…";
+    this.emit();
+    try {
+      await session.start(
+        this.settings.microphoneDeviceId,
+        (level) => {
+          this.uiState.inputLevel = level;
+          this.emit();
+        },
+        (input) => {
+          this.uiState.activeMicrophoneLabel = input.label;
+          if (input.usedDefaultFallback) {
+            new Notice(
+              `Crisp ASR：已选麦克风不可用，测试的是 ${input.label}`,
+              8_000,
+            );
+          }
+          this.emit();
+        },
+        () => {
+          if (this.microphoneTest === session) {
+            this.microphoneTest = null;
+            this.uiState.microphoneTestMode = "idle";
+            this.uiState.inputLevel = 0;
+            this.emit();
+          }
+        },
+      );
+    } catch (error) {
+      if (this.microphoneTest === session) {
+        this.microphoneTest = null;
+      }
+      this.uiState.microphoneTestMode = "idle";
+      this.uiState.inputLevel = 0;
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Crisp ASR 麦克风测试失败：${message}`, 8_000);
+      this.emit();
+    }
+  }
+
+  private async stopMicrophoneTest(): Promise<void> {
+    const session = this.microphoneTest;
+    this.microphoneTest = null;
+    await session?.stop();
+    this.uiState.microphoneTestMode = "idle";
+    this.uiState.inputLevel = 0;
+    this.emit();
   }
 
   async setSaveLiveAudio(value: boolean): Promise<void> {
@@ -661,9 +793,13 @@ export default class CrispAsrPlugin extends Plugin {
     const activeJobPaths = (this.fileQueue?.jobs() ?? [])
       .filter((job) => job.status !== "failed")
       .map((job) => job.sourcePath);
+    const metadataCompleted = collectTranscribedAudioPaths(
+      this.app.metadataCache,
+      this.app.vault.getMarkdownFiles(),
+    );
     const candidates = findUntranscribedAudio(
       this.app.vault.getFiles(),
-      this.settings.processedAudioPaths,
+      [...this.settings.processedAudioPaths, ...metadataCompleted],
       activeJobPaths,
     );
     if (candidates.length === 0) {
@@ -767,6 +903,7 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async startLiveTranscription(): Promise<void> {
+    await this.stopMicrophoneTest();
     if (!(await this.ensureLicenseActivated())) return;
     if (this.liveSession || this.liveStarting) {
       new Notice("实时听写已经开始");
@@ -804,6 +941,10 @@ export default class CrispAsrPlugin extends Plugin {
         const update = accumulator.consume(result);
         this.uiState.preview = update.preview;
         this.uiState.finalized = accumulator.utterances();
+        const activeSession = this.liveSession;
+        if (update.added.length > 0 && activeSession?.accumulator === accumulator) {
+          this.scheduleLiveDraftCheckpoint(activeSession);
+        }
         this.emit();
       },
       onError: (error) => {
@@ -846,13 +987,34 @@ export default class CrispAsrPlugin extends Plugin {
             inputEndedDuringStartup = true;
           }
         },
-        onSilence: () => {
-          if (this.liveSession) {
-            void this.stopLiveTranscription(
-              new Error("检测到持续静音 30 秒，麦克风可能已被系统静音或权限被撤销"),
+        onInputResolved: (input) => {
+          this.uiState.activeMicrophoneLabel = input.label;
+          if (input.usedDefaultFallback) {
+            new Notice(
+              `Crisp ASR：已选麦克风不可用，正在使用 ${input.label}`,
+              8_000,
             );
           }
+          this.emit();
         },
+        ...(this.settings.silenceAction === "off"
+          ? {}
+          : {
+            silenceDurationMs: this.settings.silenceDurationSeconds * 1_000,
+            onSilence: () => {
+              if (!this.liveSession) {
+                return;
+              }
+              const message = `已持续静音 ${
+                this.settings.silenceDurationSeconds
+              } 秒，请检查麦克风或继续说话`;
+              if (this.settings.silenceAction === "stop") {
+                void this.stopLiveTranscription(new Error(message));
+              } else {
+                new Notice(`Crisp ASR：${message}`, 8_000);
+              }
+            },
+          }),
       },
     );
     const recorder = this.settings.saveLiveAudio
@@ -892,8 +1054,21 @@ export default class CrispAsrPlugin extends Plugin {
         target,
         startedAt,
         startedAtMs: Date.now(),
+        draftId: randomUUID(),
         ...(sessionLogId ? { logId: sessionLogId } : {}),
       };
+      this.settings.liveDraft = {
+        id: this.liveSession.draftId,
+        startedAt,
+        targetPath: target?.path ?? null,
+        utterances: accumulator.utterances(),
+        preview: this.uiState.preview,
+        updatedAt: Date.now(),
+      };
+      this.uiState.recoveryDraft = null;
+      this.lastDraftPersistedAt = 0;
+      this.draftPersistenceWarned = false;
+      await this.persistLiveDraft();
       this.uiState.mode = "listening";
       this.uiState.status = "正在听写";
       this.elapsedTimer = window.setInterval(() => this.emit(), 1_000);
@@ -958,6 +1133,7 @@ export default class CrispAsrPlugin extends Plugin {
       this.elapsedTimer = null;
     }
     try {
+      await this.flushLiveDraft(session);
       const result = await finishLiveResources(session);
       const text = session.accumulator.finalText().trim();
       if (text.length > 0) {
@@ -981,6 +1157,11 @@ export default class CrispAsrPlugin extends Plugin {
           8_000,
         );
       }
+      if (this.settings.liveDraft?.id === session.draftId) {
+        this.settings.liveDraft = null;
+        this.uiState.recoveryDraft = null;
+        await this.persistSettings();
+      }
       const terminalError = reason ?? result.finishError;
       if (terminalError) {
         new Notice(`Crisp ASR：${terminalError.message}`, 8_000);
@@ -991,6 +1172,7 @@ export default class CrispAsrPlugin extends Plugin {
       const message = error instanceof Error ? error.message : String(error);
       this.uiState.mode = "error";
       this.uiState.status = "写入失败";
+      this.uiState.recoveryDraft = this.settings.liveDraft;
       new Notice(`Crisp ASR 收尾失败：${message}`, 8_000);
     } finally {
       await closeLiveResources(session);
@@ -1001,6 +1183,117 @@ export default class CrispAsrPlugin extends Plugin {
       this.uiState.inputLevel = 0;
       this.emit();
     }
+  }
+
+  private updateLiveDraft(session: LiveSession): void {
+    if (this.settings.liveDraft?.id !== session.draftId) {
+      return;
+    }
+    this.settings.liveDraft = {
+      ...this.settings.liveDraft,
+      utterances: session.accumulator.utterances(),
+      preview: this.uiState.preview,
+      updatedAt: Date.now(),
+    };
+  }
+
+  private scheduleLiveDraftCheckpoint(session: LiveSession): void {
+    this.updateLiveDraft(session);
+    const now = Date.now();
+    if (shouldCheckpointDraft(this.lastDraftPersistedAt, now)) {
+      void this.persistLiveDraft();
+      return;
+    }
+    if (this.draftCheckpointTimer !== null) {
+      return;
+    }
+    const remaining = Math.max(
+      0,
+      10_000 - (now - this.lastDraftPersistedAt),
+    );
+    this.draftCheckpointTimer = window.setTimeout(() => {
+      this.draftCheckpointTimer = null;
+      if (this.liveSession === session) {
+        this.updateLiveDraft(session);
+        void this.persistLiveDraft();
+      }
+    }, remaining);
+  }
+
+  private async persistLiveDraft(): Promise<void> {
+    this.lastDraftPersistedAt = Date.now();
+    try {
+      await this.persistSettings();
+      this.draftPersistenceWarned = false;
+    } catch (error) {
+      this.lastDraftPersistedAt = 0;
+      if (!this.draftPersistenceWarned) {
+        this.draftPersistenceWarned = true;
+        const message = error instanceof Error ? error.message : String(error);
+        new Notice(`Crisp ASR 恢复草稿保存失败：${message}`, 8_000);
+      }
+    }
+  }
+
+  private async flushLiveDraft(session: LiveSession): Promise<void> {
+    if (this.draftCheckpointTimer !== null) {
+      window.clearTimeout(this.draftCheckpointTimer);
+      this.draftCheckpointTimer = null;
+    }
+    this.updateLiveDraft(session);
+    await this.persistLiveDraft();
+  }
+
+  async restoreLiveDraft(mode: "target" | "new-note"): Promise<void> {
+    const draft = this.settings.liveDraft;
+    if (!draft || this.restoringDraftId) {
+      return;
+    }
+    this.restoringDraftId = draft.id;
+    try {
+      const content = renderRecoveredTranscript(draft);
+      let output: TFile;
+      const target = mode === "target" && draft.targetPath
+        ? this.app.vault.getAbstractFileByPath(draft.targetPath)
+        : null;
+      if (target instanceof TFile) {
+        await this.app.vault.process(target, (existing) => existing + content);
+        output = target;
+      } else {
+        await this.ensureFolder(this.settings.outputFolder);
+        const title = `恢复转写 ${draft.startedAt.slice(0, 16).replace("T", " ")}`;
+        const preferred = normalizePath(
+          `${this.settings.outputFolder}/${title.replace(/:/g, "-")}.md`,
+        );
+        output = await this.app.vault.create(
+          this.nextAvailablePath(preferred),
+          `---\ntype: Note\ncreated: "${draft.startedAt}"\nasr_provider: Doubao\nasr_status: Recovered\n---\n\n# ${title}${content}`,
+        );
+      }
+      if (this.settings.liveDraft?.id === draft.id) {
+        this.settings.liveDraft = null;
+        this.uiState.recoveryDraft = null;
+        await this.persistSettings();
+      }
+      await this.app.workspace.getLeaf(false).openFile(output);
+      new Notice("Crisp ASR：已恢复实时转写");
+      this.emit();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Crisp ASR 恢复失败：${message}`, 8_000);
+    } finally {
+      this.restoringDraftId = null;
+    }
+  }
+
+  async discardLiveDraft(): Promise<void> {
+    if (!this.settings.liveDraft || this.restoringDraftId) {
+      return;
+    }
+    this.settings.liveDraft = null;
+    this.uiState.recoveryDraft = null;
+    await this.persistSettings();
+    this.emit();
   }
 
   private getApiKey(): string | null {
@@ -1285,7 +1578,7 @@ export default class CrispAsrPlugin extends Plugin {
     this.settings.processedAudioPaths = [
       ...this.settings.processedAudioPaths.filter((item) => item !== path),
       path,
-    ].slice(-500);
+    ].slice(-5_000);
   }
 
   private handleQueueChange(jobs: PersistedFileJob[]): void {

@@ -24,6 +24,10 @@ function plugin(overrides: Record<string, unknown> = {}): Record<string, unknown
         { deviceId: "default", label: "系统默认" },
         { deviceId: "bluetooth", label: "蓝牙耳机" },
       ],
+      microphoneWarning: "",
+      activeMicrophoneLabel: "",
+      microphoneTestMode: "idle",
+      recoveryDraft: null,
       jobs: [],
     },
     subscribe: () => () => undefined,
@@ -31,6 +35,9 @@ function plugin(overrides: Record<string, unknown> = {}): Record<string, unknown
     refreshMicrophones: async () => undefined,
     setMicrophoneDevice: async () => undefined,
     setSaveLiveAudio: async () => undefined,
+    toggleMicrophoneTest: async () => undefined,
+    restoreLiveDraft: async () => undefined,
+    discardLiveDraft: async () => undefined,
     startLiveTranscription: async () => undefined,
     stopLiveTranscription: async () => undefined,
     scanUntranscribedRecordings: async () => undefined,
@@ -75,6 +82,25 @@ describe("Crisp ASR view controls", () => {
     expect(microphone?.value).toBe("bluetooth");
     expect(save?.checked).toBe(true);
     expect(meter?.style.width).toBe("42%");
+    expect(view.contentEl.querySelector<HTMLButtonElement>(
+      ".crisp-asr-microphone-test",
+    )?.textContent).toContain("测试麦克风");
+  });
+
+  it("shows the active microphone while testing and offers stop", async () => {
+    const instance = plugin();
+    Object.assign(instance.uiState as object, {
+      microphoneTestMode: "testing",
+      activeMicrophoneLabel: "Wireless Mic Rx",
+    });
+    const view = viewFor(instance);
+
+    await view.onOpen();
+
+    expect(view.contentEl.querySelector(".crisp-asr-microphone-test")?.textContent)
+      .toContain("停止测试");
+    expect(view.contentEl.querySelector(".crisp-asr-active-microphone")?.textContent)
+      .toContain("Wireless Mic Rx");
   });
 
   it("offers a scan action in the recent jobs header", async () => {
@@ -94,6 +120,43 @@ describe("Crisp ASR view controls", () => {
     expect(scan).not.toBeNull();
     scan?.click();
     expect(scans).toBe(1);
+  });
+
+  it("offers safe recovery actions for an interrupted live draft", async () => {
+    const calls: string[] = [];
+    const instance = plugin({
+      restoreLiveDraft: async (mode: string) => calls.push(`restore:${mode}`),
+      discardLiveDraft: async () => calls.push("discard"),
+    });
+    (instance.uiState as { recoveryDraft: unknown }).recoveryDraft = {
+      id: "draft-1",
+      startedAt: "2026-08-12T08:00:00.000Z",
+      targetPath: "Notes/idea.md",
+      utterances: [{
+        text: "找回我",
+        start_time: 0,
+        end_time: 500,
+        definite: true,
+      }],
+      preview: "",
+      updatedAt: 123,
+    };
+    const view = viewFor(instance);
+
+    await view.onOpen();
+    const buttons = Array.from(
+      view.contentEl.querySelectorAll<HTMLButtonElement>(
+        ".crisp-asr-recovery button",
+      ),
+    );
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      "写回原笔记",
+      "创建恢复笔记",
+      "丢弃",
+    ]);
+    buttons.forEach((button) => button.click());
+    await Promise.resolve();
+    expect(calls).toEqual(["restore:target", "restore:new-note", "discard"]);
   });
 
   it("updates only the level meter when the input level changes", async () => {
@@ -193,10 +256,29 @@ describe("Crisp ASR view controls", () => {
 
     await view.onOpen();
 
-    const headers = Array.from(
-      view.contentEl.querySelectorAll(".crisp-asr-field__header"),
-    ).map((element) => element.textContent?.trim());
-    expect(headers).toEqual(["麦克风"]);
+    expect(view.contentEl.querySelector(
+      ".crisp-asr-field__header > span:first-child",
+    )?.textContent).toBe("麦克风");
+  });
+
+  it("shows a missing preferred microphone warning without removing its option", async () => {
+    const instance = plugin();
+    (instance.uiState as { microphoneWarning: string }).microphoneWarning =
+      "已选麦克风当前不可用，开始时将使用系统默认";
+    (instance.uiState as { microphones: Array<{ deviceId: string; label: string }> })
+      .microphones = [
+        { deviceId: "default", label: "系统默认" },
+        { deviceId: "bluetooth", label: "已选麦克风（当前不可用）" },
+        { deviceId: "wireless-rx", label: "Wireless Mic Rx" },
+      ];
+    const view = viewFor(instance);
+
+    await view.onOpen();
+
+    expect(view.contentEl.querySelector(".crisp-asr-device-warning")?.textContent)
+      .toContain("当前不可用");
+    expect(Array.from(view.contentEl.querySelectorAll("option"))
+      .map((option) => option.textContent)).toContain("Wireless Mic Rx");
   });
 
   it("explains where a live transcript goes when no note is open", async () => {

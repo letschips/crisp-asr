@@ -4,6 +4,12 @@ class FakeTrack {
   stopped = false;
   private readonly listeners = new Set<() => void>();
 
+  label = "Wireless Mic Rx";
+
+  getSettings(): MediaTrackSettings {
+    return { deviceId: "wireless-rx" };
+  }
+
   addEventListener(type: string, listener: () => void): void {
     if (type === "ended") {
       this.listeners.add(listener);
@@ -104,6 +110,18 @@ describe("audio input acquisition", () => {
     ])).toBe("mic-1");
   });
 
+  it("reports whether the preferred microphone is currently available", async () => {
+    const { microphoneAvailability } = await import("../src/audio-input");
+    const devices = [
+      { deviceId: "default", label: "系统默认" },
+      { deviceId: "wireless-rx", label: "Wireless Mic Rx" },
+    ];
+
+    expect(microphoneAvailability("wireless-rx", devices)).toBe("available");
+    expect(microphoneAvailability("missing", devices)).toBe("missing");
+    expect(microphoneAvailability("default", devices)).toBe("available");
+  });
+
   it("keeps an authorized preferred device visible before labels are available", async () => {
     const { preservePreferredMicrophone } = await import(
       "../src/audio-input"
@@ -113,7 +131,7 @@ describe("audio input acquisition", () => {
       { deviceId: "default", label: "系统默认" },
     ], "bluetooth")).toEqual([
       { deviceId: "default", label: "系统默认" },
-      { deviceId: "bluetooth", label: "已选麦克风（刷新后显示名称）" },
+      { deviceId: "bluetooth", label: "已选麦克风（当前不可用）" },
     ]);
   });
 
@@ -169,6 +187,8 @@ describe("audio input acquisition", () => {
       deviceId: { exact: "missing-device" },
     });
     expect(constraints[1].audio).not.toHaveProperty("deviceId");
+    expect(acquired.microphone.usedDefaultFallback).toBe(true);
+    expect(acquired.microphone.label).toBe("Wireless Mic Rx");
     acquired.stop();
   });
 

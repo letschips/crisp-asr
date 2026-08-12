@@ -29,7 +29,14 @@ export interface MicrophoneChangeSource {
 
 export interface AcquiredAudioInputs {
   audioStreams: MediaStream[];
+  microphone: MicrophoneInputInfo;
   stop: () => void;
+}
+
+export interface MicrophoneInputInfo {
+  deviceId: string;
+  label: string;
+  usedDefaultFallback: boolean;
 }
 
 export function subscribeToMicrophoneChanges(
@@ -70,6 +77,16 @@ export function resolveMicrophoneDeviceId(
     : "default";
 }
 
+export function microphoneAvailability(
+  preferredDeviceId: string,
+  devices: readonly MicrophoneDevice[],
+): "available" | "missing" {
+  return preferredDeviceId === "default"
+    || devices.some((device) => device.deviceId === preferredDeviceId)
+    ? "available"
+    : "missing";
+}
+
 export function preservePreferredMicrophone(
   devices: MicrophoneDevice[],
   preferredDeviceId: string,
@@ -84,7 +101,7 @@ export function preservePreferredMicrophone(
     ...devices,
     {
       deviceId: preferredDeviceId,
-      label: "已选麦克风（刷新后显示名称）",
+      label: "已选麦克风（当前不可用）",
     },
   ];
 }
@@ -124,6 +141,7 @@ export async function acquireAudioInputs(
   onInputEnded: () => void,
 ): Promise<AcquiredAudioInputs> {
   const acquired: MediaStream[] = [];
+  let usedDefaultFallback = false;
   try {
     if (!mediaDevices.getUserMedia) {
       throw new Error("当前环境无法访问麦克风");
@@ -143,6 +161,7 @@ export async function acquireAudioInputs(
       microphone = await mediaDevices.getUserMedia({
         audio: microphoneConstraints("default"),
       });
+      usedDefaultFallback = true;
     }
     acquired.push(microphone);
   } catch (error) {
@@ -153,6 +172,8 @@ export async function acquireAudioInputs(
   let stopped = false;
   let ended = false;
   const tracks = acquired.flatMap((stream) => stream.getTracks());
+  const microphoneTrack = acquired[0]?.getAudioTracks()[0] ?? tracks[0];
+  const microphoneSettings = microphoneTrack?.getSettings?.();
   const handleEnded = (): void => {
     if (stopped || ended) {
       return;
@@ -166,6 +187,12 @@ export async function acquireAudioInputs(
 
   return {
     audioStreams: acquired,
+    microphone: {
+      deviceId: microphoneSettings?.deviceId
+        ?? (usedDefaultFallback ? "default" : microphoneDeviceId),
+      label: microphoneTrack?.label?.trim() || "系统默认",
+      usedDefaultFallback,
+    },
     stop: () => {
       if (stopped) {
         return;

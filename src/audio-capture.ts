@@ -18,7 +18,9 @@ export interface LivePcmCaptureOptions {
   microphoneDeviceId: string;
   onLevel: (level: number) => void;
   onInputEnded: () => void;
+  onInputResolved?: (input: AcquiredAudioInputs["microphone"]) => void;
   onSilence?: () => void;
+  silenceDurationMs?: number;
   acquireInputs?: typeof acquireAudioInputs;
   createMixer?: (
     ownerWindow: Window & typeof globalThis,
@@ -54,6 +56,7 @@ export class LivePcmCapture {
       this.options.microphoneDeviceId,
       this.options.onInputEnded,
     );
+    this.options.onInputResolved?.(this.acquired.microphone);
   }
 
   async start(): Promise<MediaStream> {
@@ -70,6 +73,7 @@ export class LivePcmCapture {
       onPacket: this.onPacket,
       onLevel: this.options.onLevel,
       onSilence: this.options.onSilence,
+      silenceDurationMs: this.options.silenceDurationMs,
     });
     this.mixer = mixer;
     try {

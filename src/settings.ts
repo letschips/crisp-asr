@@ -1,3 +1,8 @@
+import {
+  normalizeLiveDraft,
+  type PersistedLiveDraft,
+} from "./live-draft";
+
 export type AiProvider =
   | "ark"
   | "openai"
@@ -8,6 +13,8 @@ export type AiProvider =
 export type AiOutputMode = "same-note" | "new-note";
 
 export type AutoTranscribeScope = "recording" | "folder" | "any";
+export type SilenceAction = "warn" | "stop" | "off";
+export type SilenceDurationSeconds = 30 | 60 | 120;
 
 export type FileJobStatus =
   | "queued"
@@ -48,6 +55,9 @@ export interface CrispAsrSettings {
   microphoneDeviceId: string;
   saveLiveAudio: boolean;
   liveAudioFolder: string;
+  silenceAction: SilenceAction;
+  silenceDurationSeconds: SilenceDurationSeconds;
+  liveDraft: PersistedLiveDraft | null;
   fileJobs: PersistedFileJob[];
   licenseCode: string;
 }
@@ -70,6 +80,9 @@ export const DEFAULT_SETTINGS: CrispAsrSettings = {
     microphoneDeviceId: "default",
   saveLiveAudio: false,
   liveAudioFolder: "Crisp ASR/Audio",
+  silenceAction: "warn",
+  silenceDurationSeconds: 60,
+  liveDraft: null,
   fileJobs: [],
   licenseCode: "",
 };
@@ -178,7 +191,7 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
         typeof path === "string" && path.trim().length > 0
       )
       .map((path) => path.trim())
-      .slice(-500)
+      .slice(-5_000)
     : [];
   return {
     apiKeySecretName: typeof candidate.apiKeySecretName === "string"
@@ -232,6 +245,15 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
       candidate.liveAudioFolder,
       DEFAULT_SETTINGS.liveAudioFolder,
     ),
+    silenceAction: candidate.silenceAction === "stop"
+      || candidate.silenceAction === "off"
+      ? candidate.silenceAction
+      : "warn",
+    silenceDurationSeconds: candidate.silenceDurationSeconds === 30
+      || candidate.silenceDurationSeconds === 120
+      ? candidate.silenceDurationSeconds
+      : 60,
+    liveDraft: normalizeLiveDraft(candidate.liveDraft),
     fileJobs: normalizeFileJobs(candidate.fileJobs),
     licenseCode: cleanText(candidate.licenseCode),
   };

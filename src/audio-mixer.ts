@@ -7,7 +7,37 @@ const TARGET_SAMPLE_RATE = 16_000;
 const PACKET_SAMPLES = 3_200;
 const LEVEL_INTERVAL_MS = 100;
 const SILENCE_THRESHOLD = 0.01;
-const SILENCE_DURATION_MS = 30_000;
+const DEFAULT_SILENCE_DURATION_MS = 30_000;
+
+export class SilenceMonitor {
+  private silentSince = 0;
+  private notified = false;
+
+  constructor(
+    private readonly durationMs: number,
+    private readonly onSilence: () => void,
+  ) {}
+
+  observe(level: number, now: number): void {
+    if (level > SILENCE_THRESHOLD) {
+      this.reset();
+      return;
+    }
+    if (this.silentSince === 0) {
+      this.silentSince = now;
+      return;
+    }
+    if (!this.notified && now - this.silentSince >= this.durationMs) {
+      this.notified = true;
+      this.onSilence();
+    }
+  }
+
+  reset(): void {
+    this.silentSince = 0;
+    this.notified = false;
+  }
+}
 
 export function calculateRmsLevel(samples: Float32Array): number {
   if (samples.length === 0) {
@@ -62,6 +92,7 @@ export interface LiveAudioMixerOptions {
   onPacket: (packet: Uint8Array) => void;
   onLevel: (level: number) => void;
   onSilence?: () => void;
+  silenceDurationMs?: number;
 }
 
 export class LiveAudioMixer {
@@ -75,13 +106,19 @@ export class LiveAudioMixer {
   private level = 0;
   private lastLevelAt = 0;
   private pcmRunning = false;
-  private silentSince = 0;
-  private silenceNotified = false;
+  private readonly silenceMonitor: SilenceMonitor | null;
 
   constructor(
     private readonly ownerWindow: Window & typeof globalThis,
     private readonly options: LiveAudioMixerOptions,
-  ) {}
+  ) {
+    this.silenceMonitor = options.onSilence
+      ? new SilenceMonitor(
+        options.silenceDurationMs ?? DEFAULT_SILENCE_DURATION_MS,
+        options.onSilence,
+      )
+      : null;
+  }
 
   async start(streams: MediaStream[]): Promise<MediaStream> {
     if (this.context) {
@@ -127,18 +164,7 @@ export class LiveAudioMixer {
         this.lastLevelAt = now;
         this.options.onLevel(this.level);
       }
-      if (this.level > SILENCE_THRESHOLD) {
-        this.silentSince = 0;
-        this.silenceNotified = false;
-      } else if (this.silentSince === 0) {
-        this.silentSince = now;
-      } else if (
-        !this.silenceNotified
-        && now - this.silentSince >= SILENCE_DURATION_MS
-      ) {
-        this.silenceNotified = true;
-        this.options.onSilence?.();
-      }
+      this.silenceMonitor?.observe(this.level, now);
       for (
         const packet of this.packetizer.push(
           input,
@@ -161,8 +187,7 @@ export class LiveAudioMixer {
       return;
     }
     this.pcmRunning = false;
-    this.silentSince = 0;
-    this.silenceNotified = false;
+    this.silenceMonitor?.reset();
     if (this.processor) {
       this.processor.onaudioprocess = null;
       this.compressor?.disconnect(this.processor);

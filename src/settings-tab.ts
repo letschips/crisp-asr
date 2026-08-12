@@ -8,6 +8,7 @@ import {
 import type CrispAsrPlugin from "./main";
 import { renderAboutCard } from "./settings-about";
 import type { AiProvider } from "./settings";
+import type { SilenceAction, SilenceDurationSeconds } from "./settings";
 import { verifyLicenseCode } from "./license";
 import shortcutQrCode from "./assets/shortcut-qr.png";
 
@@ -353,6 +354,46 @@ export class CrispAsrSettingTab extends PluginSettingTab {
         .onChange(async (value) => {
           await this.plugin.setSaveLiveAudio(value);
         }));
+
+    const silenceDuration = new Setting(live)
+      .setName("静音持续时间")
+      .setDesc("连续低音量达到该时长后触发静音保护。")
+      .addDropdown((dropdown) => dropdown
+        .addOption("30", "30 秒")
+        .addOption("60", "60 秒")
+        .addOption("120", "120 秒")
+        .setValue(String(this.plugin.settings.silenceDurationSeconds))
+        .onChange(async (value) => {
+          const duration = Number(value);
+          this.plugin.settings.silenceDurationSeconds = (
+            duration === 30 || duration === 120 ? duration : 60
+          ) as SilenceDurationSeconds;
+          await this.plugin.saveSettings();
+        }));
+
+    const updateSilenceDuration = (): void => {
+      silenceDuration.settingEl.classList.toggle(
+        "is-hidden",
+        this.plugin.settings.silenceAction === "off",
+      );
+    };
+
+    new Setting(live)
+      .setName("静音保护")
+      .setDesc("默认只提醒，不会因为停顿而擅自结束听写。")
+      .addDropdown((dropdown) => dropdown
+        .addOption("warn", "仅提醒")
+        .addOption("stop", "自动结束并写入")
+        .addOption("off", "关闭")
+        .setValue(this.plugin.settings.silenceAction)
+        .onChange(async (value) => {
+          this.plugin.settings.silenceAction = (
+            value === "stop" || value === "off" ? value : "warn"
+          ) as SilenceAction;
+          await this.plugin.saveSettings();
+          updateSilenceDuration();
+        }));
+    updateSilenceDuration();
 
     new Setting(live)
       .setName("实时录音目录")

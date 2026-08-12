@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 describe("live audio mixing primitives", () => {
+  it("notifies once per configured continuous silence period and resets on sound", async () => {
+    const { SilenceMonitor } = await import("../src/audio-mixer");
+    let notifications = 0;
+    const monitor = new SilenceMonitor(60_000, () => {
+      notifications += 1;
+    });
+
+    monitor.observe(0, 1_000);
+    monitor.observe(0, 60_999);
+    expect(notifications).toBe(0);
+    monitor.observe(0, 61_000);
+    monitor.observe(0, 90_000);
+    expect(notifications).toBe(1);
+    monitor.observe(0.1, 91_000);
+    monitor.observe(0, 92_000);
+    monitor.observe(0, 152_000);
+    expect(notifications).toBe(2);
+  });
   it("calculates RMS input level and clamps invalid samples", async () => {
     const { calculateRmsLevel } = await import("../src/audio-mixer");
 

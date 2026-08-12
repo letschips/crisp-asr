@@ -5,6 +5,7 @@ import {
 } from "obsidian";
 import type CrispAsrPlugin from "./main";
 import type { PersistedFileJob } from "./settings";
+import type { PersistedLiveDraft } from "./live-draft";
 
 export const CRISP_ASR_VIEW_TYPE = "crisp-asr";
 
@@ -16,12 +17,16 @@ interface ViewSnapshot {
   finalized: readonly unknown[];
   jobs: readonly unknown[];
   microphones: readonly unknown[];
+  microphoneWarning: string;
+  activeMicrophoneLabel: string;
+  microphoneTestMode: string;
   microphoneDeviceId: string;
   saveLiveAudio: boolean;
   smartTargetPath: string | null;
   smartMode: string;
   smartProgress: string;
   elapsed: string;
+  recoveryDraft: PersistedLiveDraft | null;
 }
 
 function formatJobMessage(job: PersistedFileJob): string {
@@ -122,6 +127,9 @@ export class CrispAsrView extends ItemView {
       finalized: state.finalized,
       jobs: state.jobs,
       microphones: state.microphones,
+      microphoneWarning: state.microphoneWarning,
+      activeMicrophoneLabel: state.activeMicrophoneLabel,
+      microphoneTestMode: state.microphoneTestMode,
       microphoneDeviceId: this.plugin.settings.microphoneDeviceId,
       saveLiveAudio: this.plugin.settings.saveLiveAudio,
       smartTargetPath: state.smartTargetPath,
@@ -130,6 +138,7 @@ export class CrispAsrView extends ItemView {
       elapsed: state.mode === "listening"
         ? this.plugin.formatElapsed()
         : "",
+      recoveryDraft: state.recoveryDraft,
     };
   }
 
@@ -141,11 +150,15 @@ export class CrispAsrView extends ItemView {
       && left.finalized === right.finalized
       && left.jobs === right.jobs
       && left.microphones === right.microphones
+      && left.microphoneWarning === right.microphoneWarning
+      && left.activeMicrophoneLabel === right.activeMicrophoneLabel
+      && left.microphoneTestMode === right.microphoneTestMode
       && left.microphoneDeviceId === right.microphoneDeviceId
       && left.saveLiveAudio === right.saveLiveAudio
       && left.smartTargetPath === right.smartTargetPath
       && left.smartMode === right.smartMode
-      && left.smartProgress === right.smartProgress;
+      && left.smartProgress === right.smartProgress
+      && left.recoveryDraft === right.recoveryDraft;
   }
 
   private update(): void {
@@ -217,6 +230,55 @@ export class CrispAsrView extends ItemView {
     badge.textContent = state.status;
     header.append(identity, badge);
 
+    const recovery = state.recoveryDraft
+      ? document.createElement("section")
+      : null;
+    if (recovery && state.recoveryDraft) {
+      recovery.className = "crisp-asr-card crisp-asr-recovery";
+      const recoveryTitle = document.createElement("div");
+      recoveryTitle.className = "crisp-asr-card__title";
+      const recoveryHeading = document.createElement("strong");
+      recoveryHeading.textContent = "发现未写入的实时转写";
+      const recoveryTime = document.createElement("span");
+      recoveryTime.textContent = state.recoveryDraft.startedAt
+        .slice(0, 16)
+        .replace("T", " ");
+      recoveryTitle.append(recoveryHeading, recoveryTime);
+      const recoveryDescription = document.createElement("p");
+      recoveryDescription.className = "crisp-asr-recovery__description";
+      recoveryDescription.textContent = state.recoveryDraft.targetPath
+        ? `原目标：${state.recoveryDraft.targetPath}`
+        : "原听写没有指定目标笔记";
+      const recoveryActions = document.createElement("div");
+      recoveryActions.className = "crisp-asr-recovery__actions";
+      createButton(
+        recoveryActions,
+        "写回原笔记",
+        "undo-2",
+        "is-primary",
+        () => void this.plugin.restoreLiveDraft("target"),
+        state.mode !== "idle" && state.mode !== "error",
+      );
+      createButton(
+        recoveryActions,
+        "创建恢复笔记",
+        "file-plus-2",
+        "is-secondary",
+        () => void this.plugin.restoreLiveDraft("new-note"),
+        state.mode !== "idle" && state.mode !== "error",
+      );
+      const discard = document.createElement("button");
+      discard.type = "button";
+      discard.className = "crisp-asr-recovery__discard";
+      discard.textContent = "丢弃";
+      discard.disabled = state.mode !== "idle" && state.mode !== "error";
+      discard.addEventListener("click", () => {
+        void this.plugin.discardLiveDraft();
+      });
+      recoveryActions.append(discard);
+      recovery.append(recoveryTitle, recoveryDescription, recoveryActions);
+    }
+
     const controls = document.createElement("section");
     controls.className = "crisp-asr-card crisp-asr-controls";
     const controlTitle = document.createElement("div");
@@ -240,6 +302,7 @@ export class CrispAsrView extends ItemView {
     const sourceControls = document.createElement("div");
     sourceControls.className = "crisp-asr-source-controls";
     const locked = state.mode !== "idle" && state.mode !== "error";
+    const testingMicrophone = state.microphoneTestMode === "testing";
 
     const microphoneField = document.createElement("label");
     microphoneField.className = "crisp-asr-field crisp-asr-microphone-field";
@@ -251,15 +314,26 @@ export class CrispAsrView extends ItemView {
     refresh.type = "button";
     refresh.className = "crisp-asr-device-refresh clickable-icon";
     refresh.ariaLabel = "刷新麦克风设备";
-    refresh.disabled = locked;
+    refresh.disabled = locked || testingMicrophone;
     setIcon(refresh, "refresh-cw");
     refresh.addEventListener("click", () => {
       void this.plugin.refreshMicrophones(true);
     });
-    microphoneHeader.append(microphoneLabel, refresh);
+    const microphoneHeaderActions = document.createElement("span");
+    microphoneHeaderActions.className = "crisp-asr-device-actions";
+    const testMicrophone = document.createElement("button");
+    testMicrophone.type = "button";
+    testMicrophone.className = "crisp-asr-microphone-test";
+    testMicrophone.textContent = testingMicrophone ? "停止测试" : "测试麦克风";
+    testMicrophone.disabled = locked;
+    testMicrophone.addEventListener("click", () => {
+      void this.plugin.toggleMicrophoneTest();
+    });
+    microphoneHeaderActions.append(testMicrophone, refresh);
+    microphoneHeader.append(microphoneLabel, microphoneHeaderActions);
     const microphoneSelect = document.createElement("select");
     microphoneSelect.className = "crisp-asr-microphone dropdown";
-    microphoneSelect.disabled = locked;
+    microphoneSelect.disabled = locked || testingMicrophone;
     for (const microphone of state.microphones) {
       const option = document.createElement("option");
       option.value = microphone.deviceId;
@@ -271,6 +345,18 @@ export class CrispAsrView extends ItemView {
       void this.plugin.setMicrophoneDevice(microphoneSelect.value);
     });
     microphoneField.append(microphoneHeader, microphoneSelect);
+    if (state.microphoneWarning) {
+      const warning = document.createElement("span");
+      warning.className = "crisp-asr-device-warning";
+      warning.textContent = state.microphoneWarning;
+      microphoneField.append(warning);
+    }
+    if (testingMicrophone && state.activeMicrophoneLabel) {
+      const active = document.createElement("span");
+      active.className = "crisp-asr-active-microphone";
+      active.textContent = `正在测试：${state.activeMicrophoneLabel}`;
+      microphoneField.append(active);
+    }
     sourceControls.append(microphoneField);
 
     const recordingRow = document.createElement("div");
@@ -494,7 +580,11 @@ export class CrispAsrView extends ItemView {
       jobs.append(row);
     }
 
-    shell.append(header, controls, transcript, smart, jobs);
+    shell.append(header);
+    if (recovery) {
+      shell.append(recovery);
+    }
+    shell.append(controls, transcript, smart, jobs);
     this.contentEl.append(shell);
     transcriptBody.scrollTop = followedLatest
       ? transcriptBody.scrollHeight

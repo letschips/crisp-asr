@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import CrispAsrPlugin from "../src/main";
 import { findUntranscribedAudio } from "../src/main";
+import { collectTranscribedAudioPaths } from "../src/main";
 import { matchesAutoTranscribeScope } from "../src/file-routing";
 
 function createApp(): Record<string, unknown> {
@@ -138,7 +139,8 @@ describe("plugin interaction registration", () => {
       for (const listener of listeners) {
         listener();
       }
-      await plugin.refreshMicrophones();
+      await Promise.resolve();
+      await Promise.resolve();
 
       expect(plugin.uiState.microphones).toContainEqual({
         deviceId: "wireless-rx",
@@ -246,5 +248,22 @@ describe("untranscribed audio discovery", () => {
       [],
       [],
     )).toEqual(["剪辑/d.webm", "录音/a.m4a", "录音/b.mp3"]);
+  });
+
+  it("excludes audio already referenced by a completed transcript note", () => {
+    const notes = [
+      { path: "Crisp ASR/a.md" },
+      { path: "Crisp ASR/b.md" },
+    ];
+    const metadata = {
+      getFileCache: (file: { path: string }) => file.path.endsWith("a.md")
+        ? { frontmatter: { source_audio: "[[录音/a.m4a]]" } }
+        : { frontmatter: { source_audio: "not-an-audio.txt" } },
+    };
+
+    const completed = collectTranscribedAudioPaths(metadata, notes);
+    expect([...completed]).toEqual(["录音/a.m4a"]);
+    expect(findUntranscribedAudio(files, [...completed], []))
+      .toEqual(["剪辑/d.webm", "录音/b.mp3"]);
   });
 });

@@ -72,6 +72,8 @@ function plugin(): Record<string, unknown> {
       microphoneDeviceId: "default",
       saveLiveAudio: false,
       liveAudioFolder: "Crisp ASR/Audio",
+      silenceAction: "warn",
+      silenceDurationSeconds: 60,
       autoTranscribeRecordings: false,
       autoTranscribeScope: "recording",
       autoTranscribeFolder: "",
@@ -154,5 +156,16 @@ describe("AI text processing settings", () => {
       "https://www.icloud.com/shortcuts/b5c18553917b4f96bb302f88ccb2f0d4",
     );
     expect(qrSetting?.querySelector("img")).not.toBeNull();
+  });
+
+  it("offers silence strategy and duration controls", () => {
+    const tab = new CrispAsrSettingTab({} as never, plugin() as never);
+
+    tab.display();
+
+    expect(tab.containerEl.textContent).toContain("静音保护");
+    expect(tab.containerEl.textContent).toContain("仅提醒");
+    expect(tab.containerEl.textContent).toContain("自动结束并写入");
+    expect(tab.containerEl.textContent).toContain("60 秒");
   });
 });

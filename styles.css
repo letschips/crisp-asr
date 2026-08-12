@@ -237,6 +237,58 @@
   padding: 3px;
 }
 
+.crisp-asr-device-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.crisp-asr-microphone-test {
+  height: 20px;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 18px;
+}
+
+.crisp-asr-device-warning,
+.crisp-asr-active-microphone {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-warning, var(--text-muted));
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.crisp-asr-active-microphone {
+  color: var(--text-accent);
+}
+
+.crisp-asr-recovery__description {
+  margin: 10px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.crisp-asr-recovery__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.crisp-asr-recovery__discard {
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-width: 54px;
+  color: var(--text-muted);
+}
+
 .crisp-asr-device-refresh svg {
   width: 12px;
   height: 12px;

@@ -8,6 +8,11 @@ describe("live PCM capture coordinator", () => {
     const mixedStream = {} as MediaStream;
     const acquired = {
       audioStreams: [inputStream],
+      microphone: {
+        deviceId: "bluetooth",
+        label: "蓝牙耳机",
+        usedDefaultFallback: false,
+      },
       stop: () => {
         events.push("inputs:stop");
       },
@@ -69,6 +74,11 @@ describe("live PCM capture coordinator", () => {
         onInputEnded: () => undefined,
         acquireInputs: async () => ({
           audioStreams: [{} as MediaStream],
+          microphone: {
+            deviceId: "default",
+            label: "系统默认",
+            usedDefaultFallback: false,
+          },
           stop: () => {
             events.push("inputs:stop");
           },
