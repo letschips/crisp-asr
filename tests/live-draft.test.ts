@@ -29,6 +29,13 @@ describe("live transcript recovery", () => {
     expect(normalizeLiveDraft({ ...valid, id: "" })).toBeNull();
   });
 
+  it("preserves the ASR provider used by a recoverable live session", () => {
+    expect(normalizeLiveDraft({ ...valid, provider: "Gemini" }))
+      .toEqual({ ...valid, provider: "Gemini" });
+    expect(normalizeLiveDraft({ ...valid, provider: "unknown" }))
+      .toEqual(valid);
+  });
+
   it("renders recovered content without losing finalized or preview text", () => {
     const content = renderRecoveredTranscript(valid);
     expect(content).toContain("恢复的实时转写");

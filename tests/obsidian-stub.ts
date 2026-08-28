@@ -207,6 +207,11 @@ class ToggleComponent {
     return this;
   }
 
+  setDisabled(disabled: boolean): this {
+    this.toggleEl.disabled = disabled;
+    return this;
+  }
+
   onChange(callback: (value: boolean) => unknown): this {
     this.toggleEl.addEventListener("change", () => {
       void callback(this.toggleEl.checked);

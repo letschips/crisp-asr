@@ -7,7 +7,13 @@ import {
 describe("settings normalization", () => {
   it("uses safe first-run defaults without storing a secret value", () => {
     expect(normalizeSettings(undefined)).toEqual(DEFAULT_SETTINGS);
+    expect(DEFAULT_SETTINGS.sttEngine).toBe("doubao");
     expect(DEFAULT_SETTINGS.apiKeySecretName).toBe("");
+    expect(DEFAULT_SETTINGS.geminiApiKeySecretName).toBe("");
+    expect(DEFAULT_SETTINGS.geminiMode).toBe("smart");
+    expect(DEFAULT_SETTINGS.geminiIdentifySpeakers).toBe(false);
+    expect(DEFAULT_SETTINGS.geminiWordTimestamps).toBe(false);
+    expect(DEFAULT_SETTINGS.geminiCustomVocabulary).toBe("");
     expect(DEFAULT_SETTINGS.aiApiKeySecretName).toBe("");
     expect(DEFAULT_SETTINGS.aiProvider).toBe("ark");
     expect(DEFAULT_SETTINGS.aiModel).toBe("");
@@ -49,6 +55,24 @@ describe("settings normalization", () => {
       boostingTableId: "table-1",
       useActiveNoteContext: true,
       identifySpeakers: true,
+    });
+  });
+
+  it("normalizes Gemini STT engine settings", () => {
+    expect(normalizeSettings({
+      sttEngine: "gemini",
+      geminiApiKeySecretName: " gemini-secret ",
+      geminiMode: "verbatim",
+      geminiIdentifySpeakers: true,
+      geminiWordTimestamps: true,
+      geminiCustomVocabulary: " Obsidian\nGemini 3.5 ",
+    })).toMatchObject({
+      sttEngine: "gemini",
+      geminiApiKeySecretName: "gemini-secret",
+      geminiMode: "verbatim",
+      geminiIdentifySpeakers: true,
+      geminiWordTimestamps: true,
+      geminiCustomVocabulary: "Obsidian\nGemini 3.5",
     });
   });
 

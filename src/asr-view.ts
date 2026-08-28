@@ -40,7 +40,7 @@ function formatJobMessage(job: PersistedFileJob): string {
     case "preparing":
       return `正在准备音频${attempt}`;
     case "transcribing":
-      return `豆包识别中${attempt}`;
+      return `语音识别中${attempt}`;
     case "retry-wait":
       return `等待自动重试${attempt} · ${job.lastError ?? "临时错误"}`;
     case "completed":

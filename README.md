@@ -1,7 +1,17 @@
 # Crisp ASR
 
 Crisp ASR is a desktop-only Obsidian plugin by **letschips** that connects
-directly to Doubao Speech Recognition.
+directly to Doubao Speech Recognition or Google Gemini 3.5 Transcribe.
+
+## Version 0.6.0
+
+- 新增 Google Gemini 3.5 Transcribe，文件转写与实时听写共用独立的 Gemini Secret；豆包配置与 Key 保持不变。
+- Gemini 文件转写支持 Smart / Verbatim、自定义词汇，以及 Verbatim 下的说话人分离和词级时间戳；Smart 与后两项按官方限制互斥。
+- Gemini 实时听写使用 `gemini-3.5-transcribe-live`，支持实时预览、确定稿、自定义词汇与 Smart 模式；音频按官方建议拆分为不超过 100ms 的 PCM 块，单次服务会话最长 10 分钟，插件会在意外断开后自动重连。
+- Gemini 文件通常最长 1 小时；开启说话人分离或词级时间戳时最长 30 分钟。
+- API Key 保存在 Obsidian SecretStorage；HTTP 请求通过请求头发送 Key，音频直接上传至所选语音服务，插件不经过自建中转服务器。
+
+Gemini 限制与参数以 Google 的 [文件转写文档](https://ai.google.dev/gemini-api/docs/transcribe) 和 [实时转写文档](https://ai.google.dev/gemini-api/docs/live-api/live-transcribe) 为准。
 
 ## Version 0.5.0
 
@@ -208,5 +218,6 @@ engine and adds an optional, separate AI text-processing layer.
   append the final result to the note that was active when recording started.
 - Store the API key through Obsidian SecretStorage rather than plugin data.
 
-The plugin sends selected files and explicitly authorized microphone or
-computer audio directly to Volcengine. It does not run a proxy service.
+The plugin sends selected files and microphone audio directly to the speech
+provider selected in settings (Volcengine or Google Gemini). It does not run a
+proxy service.

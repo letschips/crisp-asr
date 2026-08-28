@@ -7,6 +7,9 @@ import {
   type DictationProfileId,
 } from "./dictation-profile";
 
+export type SttEngine = "doubao" | "gemini";
+export type GeminiMode = "smart" | "verbatim";
+
 export type AiProvider =
   | "ark"
   | "openai"
@@ -42,7 +45,13 @@ export interface PersistedFileJob {
 }
 
 export interface CrispAsrSettings {
+  sttEngine: SttEngine;
   apiKeySecretName: string;
+  geminiApiKeySecretName: string;
+  geminiMode: GeminiMode;
+  geminiIdentifySpeakers: boolean;
+  geminiWordTimestamps: boolean;
+  geminiCustomVocabulary: string;
   aiProvider: AiProvider;
   aiApiKeySecretName: string;
   aiModel: string;
@@ -75,7 +84,13 @@ export interface CrispAsrSettings {
 }
 
 export const DEFAULT_SETTINGS: CrispAsrSettings = {
+  sttEngine: "doubao",
   apiKeySecretName: "",
+  geminiApiKeySecretName: "",
+  geminiMode: "smart",
+  geminiIdentifySpeakers: false,
+  geminiWordTimestamps: false,
+  geminiCustomVocabulary: "",
   aiProvider: "ark",
   aiApiKeySecretName: "",
   aiModel: "",
@@ -89,7 +104,7 @@ export const DEFAULT_SETTINGS: CrispAsrSettings = {
   outputMode: "sidecar",
   liveResourceId: "volc.seedasr.sauc.duration",
   processedAudioPaths: [],
-    microphoneDeviceId: "default",
+  microphoneDeviceId: "default",
   saveLiveAudio: false,
   liveAudioFolder: "Crisp ASR/Audio",
   silenceAction: "warn",
@@ -214,9 +229,17 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
       .slice(-5_000)
     : [];
   return {
+    sttEngine: candidate.sttEngine === "gemini" ? "gemini" : "doubao",
     apiKeySecretName: typeof candidate.apiKeySecretName === "string"
       ? candidate.apiKeySecretName
       : DEFAULT_SETTINGS.apiKeySecretName,
+    geminiApiKeySecretName: cleanText(candidate.geminiApiKeySecretName),
+    geminiMode: candidate.geminiMode === "verbatim" ? "verbatim" : "smart",
+    geminiIdentifySpeakers: candidate.geminiIdentifySpeakers === true,
+    geminiWordTimestamps: candidate.geminiWordTimestamps === true,
+    geminiCustomVocabulary: typeof candidate.geminiCustomVocabulary === "string"
+      ? candidate.geminiCustomVocabulary.trim()
+      : "",
     aiProvider:
       candidate.aiProvider === "openai"
       || candidate.aiProvider === "anthropic"

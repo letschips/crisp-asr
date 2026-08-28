@@ -9,6 +9,7 @@ export interface PersistedLiveDraft {
   utterances: TranscriptUtterance[];
   preview: string;
   markers?: LiveMarker[];
+  provider?: "Doubao" | "Gemini";
   updatedAt: number;
 }
 
@@ -59,7 +60,19 @@ export function normalizeLiveDraft(value: unknown): PersistedLiveDraft | null {
     return null;
   }
   const markers = normalizeLiveMarkers(candidate.markers);
-  return { id, startedAt, targetPath, utterances, preview, updatedAt, ...(markers.length ? { markers } : {}) };
+  const provider = candidate.provider === "Doubao" || candidate.provider === "Gemini"
+    ? candidate.provider
+    : undefined;
+  return {
+    id,
+    startedAt,
+    targetPath,
+    utterances,
+    preview,
+    updatedAt,
+    ...(markers.length ? { markers } : {}),
+    ...(provider ? { provider } : {}),
+  };
 }
 
 export function renderRecoveredTranscript(draft: PersistedLiveDraft): string {

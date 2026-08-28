@@ -61,7 +61,13 @@ function installObsidianElementHelpers(): void {
 function plugin(): Record<string, unknown> {
   return {
     settings: {
+      sttEngine: "doubao",
       apiKeySecretName: "speech-key",
+      geminiApiKeySecretName: "gemini-key",
+      geminiMode: "smart",
+      geminiIdentifySpeakers: false,
+      geminiWordTimestamps: false,
+      geminiCustomVocabulary: "",
       liveResourceId: "volc.seedasr.sauc.duration",
       aiProvider: "anthropic",
       aiApiKeySecretName: "claude-key",
@@ -167,5 +173,24 @@ describe("AI text processing settings", () => {
     expect(tab.containerEl.textContent).toContain("仅提醒");
     expect(tab.containerEl.textContent).toContain("自动结束并写入");
     expect(tab.containerEl.textContent).toContain("60 秒");
+  });
+
+  it("shows Gemini-specific controls and honest Smart-mode constraints", () => {
+    const gemini = plugin();
+    (gemini.settings as Record<string, unknown>).sttEngine = "gemini";
+    const tab = new CrispAsrSettingTab({} as never, gemini as never);
+
+    tab.display();
+
+    expect(tab.containerEl.textContent).toContain("豆包或 Gemini");
+    expect(tab.containerEl.textContent).toContain("Gemini 3.5 Transcribe 连接与配置");
+    expect(tab.containerEl.textContent).toContain("最多 10 分钟");
+    expect(tab.containerEl.textContent).toContain("30 分钟");
+    expect(tab.containerEl.textContent).toContain("建议不超过 100 条");
+    expect(tab.containerEl.textContent).not.toContain("火山热词 ID");
+    expect(tab.containerEl.textContent).not.toContain("语音识别仍使用豆包");
+    expect(tab.containerEl.querySelectorAll<HTMLInputElement>(
+      'input[type="checkbox"]:disabled',
+    )).toHaveLength(2);
   });
 });

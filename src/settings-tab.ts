@@ -54,7 +54,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const intro = containerEl.createDiv({ cls: "crisp-asr-settings__intro" });
     intro.createEl("h2", { text: "Crisp ASR" });
     intro.createEl("p", {
-      text: "连接豆包语音，把录音和实时声音直接沉淀为 Markdown。",
+      text: "连接豆包或 Gemini，把录音和实时声音直接沉淀为 Markdown。",
     });
 
     // -----------------------------------------------------------------
@@ -115,68 +115,204 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     }
 
     // -----------------------------------------------------------------
-    // 2. 豆包连接组 (必须激活才能配置 Key)
+    // 2. 语音识别引擎选择
     // -----------------------------------------------------------------
-    const connection = createSettingGroup(
+    const engineGroup = createSettingGroup(
       containerEl,
-      "豆包连接",
-      "API Key 由 Obsidian SecretStorage 安全保存",
+      "语音识别引擎",
+      "选择用于实时听写与录音文件转写的底层 STT 服务",
       true,
     );
 
-    new Setting(connection)
-      .setName("API Key")
-      .setDesc(
-        isActivated
-          ? "选择已有 Secret，或创建一个新的豆包语音 API Key。"
-          : "🔒 必须先在上方【软件授权】中激活 Crisp ASR 后才能配置 API Key。"
-      )
-      .addComponent((container) =>
-        new SecretComponent(this.app, container)
-          .setValue(this.plugin.settings.apiKeySecretName)
-          .onChange(async (value) => {
-            if (!isActivated) {
-              const check = await verifyLicenseCode(this.plugin.settings.licenseCode);
-              if (!check.valid) {
-                new Notice("🔒 请先在上方【软件授权】中激活 Crisp ASR 软件！");
-                return;
-              }
-            }
-            this.plugin.settings.apiKeySecretName = value;
-            await this.plugin.saveSettings();
-          })
+    new Setting(engineGroup)
+      .setName("当前引擎")
+      .setDesc("支持火山引擎豆包或 Google Gemini 3.5 Transcribe。")
+      .addDropdown((dropdown) => dropdown
+        .addOption("doubao", "火山引擎 · 豆包 ASR")
+        .addOption("gemini", "Google · Gemini 3.5 Transcribe")
+        .setValue(this.plugin.settings.sttEngine)
+        .onChange(async (value) => {
+          this.plugin.settings.sttEngine = value as "doubao" | "gemini";
+          await this.plugin.saveSettings();
+          this.display();
+        }));
+
+    if (this.plugin.settings.sttEngine === "gemini") {
+      // -----------------------------------------------------------------
+      // 3. Gemini 3.5 Transcribe 连接与配置
+      // -----------------------------------------------------------------
+      const geminiGroup = createSettingGroup(
+        containerEl,
+        "Gemini 3.5 Transcribe 连接与配置",
+        "文件最长 1 小时（说话人或词级时间戳最长 30 分钟）；实时单次会话最多 10 分钟，断线后自动重连",
+        true,
       );
 
-    new Setting(connection)
-      .setName("实时识别资源")
-      .setDesc("默认使用豆包流式语音识别模型 2.0 小时版。")
-      .addText((text) => text
-        .setPlaceholder("volc.seedasr.sauc.duration")
-        .setValue(this.plugin.settings.liveResourceId)
-        .onChange(async (value) => {
-          this.plugin.settings.liveResourceId = value.trim()
-            || "volc.seedasr.sauc.duration";
-          await this.plugin.saveSettings();
-        }));
+      new Setting(geminiGroup)
+        .setName("Gemini API Key")
+        .setDesc(
+          isActivated
+            ? "选择已有 Secret，或创建一个新的 Google Gemini API Key。"
+            : "🔒 必须先在上方【软件授权】中激活 Crisp ASR 后才能配置 API Key。"
+        )
+        .addComponent((container) =>
+          new SecretComponent(this.app, container)
+            .setValue(this.plugin.settings.geminiApiKeySecretName)
+            .onChange(async (value) => {
+              if (!isActivated) {
+                const check = await verifyLicenseCode(this.plugin.settings.licenseCode);
+                if (!check.valid) {
+                  new Notice("🔒 请先在上方【软件授权】中激活 Crisp ASR 软件！");
+                  return;
+                }
+              }
+              this.plugin.settings.geminiApiKeySecretName = value;
+              await this.plugin.saveSettings();
+            })
+        );
 
-    new Setting(connection)
-      .setName("测试连接")
-      .setDesc("发送 0.1 秒静音样本，验证 API Key 与极速识别服务。")
-      .addButton((button) => button
-        .setButtonText("开始测试")
-        .onClick(async () => {
-          const check = await verifyLicenseCode(this.plugin.settings.licenseCode);
-          if (!check.valid) {
-            new Notice("🔒 请先在上方【软件授权】中激活 Crisp ASR 软件！");
-            return;
-          }
-          await this.plugin.testConnection();
-        }));
+      new Setting(geminiGroup)
+        .setName("转写模式")
+        .setDesc("Smart 自动去口头语并排版；Verbatim 忠实保留原始字词，并可选说话人或词级时间戳。")
+        .addDropdown((dropdown) => dropdown
+          .addOption("smart", "智能转写 (Smart · 自动修剪与排版)")
+          .addOption("verbatim", "原始逐字 (Verbatim · 逐字稿与时间戳)")
+          .setValue(this.plugin.settings.geminiMode)
+          .onChange(async (value) => {
+            this.plugin.settings.geminiMode = value as "smart" | "verbatim";
+            await this.plugin.saveSettings();
+            this.display();
+          }));
+
+      const isSmart = this.plugin.settings.geminiMode !== "verbatim";
+
+      const diarizationSetting = new Setting(geminiGroup)
+        .setName("区分说话人 (Diarization)")
+        .setDesc(
+          isSmart
+            ? "⚠️ Smart 模式下已自动禁用（Google 官方规则：Smart 模式与说话人分离互斥）"
+            : "在文件转写中自动识别并标注不同发言者 (Speaker 1, 2...)"
+        )
+        .addToggle((toggle) => toggle
+          .setValue(!isSmart && this.plugin.settings.geminiIdentifySpeakers)
+          .setDisabled(isSmart)
+          .onChange(async (value) => {
+            this.plugin.settings.geminiIdentifySpeakers = value;
+            await this.plugin.saveSettings();
+          }));
+      if (isSmart) {
+        diarizationSetting.settingEl.addClass("is-disabled");
+      }
+
+      const timestampSetting = new Setting(geminiGroup)
+        .setName("词级时间戳 (Word Timestamps)")
+        .setDesc(
+          isSmart
+            ? "⚠️ Smart 模式下已自动禁用（Google 官方规则：Smart 模式与词级时间戳互斥）"
+            : "为转写文本生成精确词级起止时间戳"
+        )
+        .addToggle((toggle) => toggle
+          .setValue(!isSmart && this.plugin.settings.geminiWordTimestamps)
+          .setDisabled(isSmart)
+          .onChange(async (value) => {
+            this.plugin.settings.geminiWordTimestamps = value;
+            await this.plugin.saveSettings();
+          }));
+      if (isSmart) {
+        timestampSetting.settingEl.addClass("is-disabled");
+      }
+
+      new Setting(geminiGroup)
+        .setName("Gemini 专属自定义词汇")
+        .setDesc("可选：每行或逗号分隔专有名词（最多 1,000 条，建议不超过 100 条）。留空时自动复用下方的本地术语库。")
+        .addTextArea((text) => text
+          .setPlaceholder("Obsidian\nClaude\n产品名称\n人名")
+          .setValue(this.plugin.settings.geminiCustomVocabulary)
+          .onChange(async (value) => {
+            this.plugin.settings.geminiCustomVocabulary = value.trim();
+            await this.plugin.saveSettings();
+          }));
+
+      new Setting(geminiGroup)
+        .setName("测试 Gemini 连接")
+        .setDesc("验证 API Key 是否能访问 Gemini 3.5 Transcribe 模型信息；不消耗转写额度。")
+        .addButton((button) => button
+          .setButtonText("开始测试")
+          .onClick(async () => {
+            const check = await verifyLicenseCode(this.plugin.settings.licenseCode);
+            if (!check.valid) {
+              new Notice("🔒 请先在上方【软件授权】中激活 Crisp ASR 软件！");
+              return;
+            }
+            await this.plugin.testConnection();
+          }));
+    } else {
+      // -----------------------------------------------------------------
+      // 2. 豆包连接组 (必须激活才能配置 Key)
+      // -----------------------------------------------------------------
+      const connection = createSettingGroup(
+        containerEl,
+        "豆包连接",
+        "API Key 由 Obsidian SecretStorage 安全保存",
+        true,
+      );
+
+      new Setting(connection)
+        .setName("API Key")
+        .setDesc(
+          isActivated
+            ? "选择已有 Secret，或创建一个新的豆包语音 API Key。"
+            : "🔒 必须先在上方【软件授权】中激活 Crisp ASR 后才能配置 API Key。"
+        )
+        .addComponent((container) =>
+          new SecretComponent(this.app, container)
+            .setValue(this.plugin.settings.apiKeySecretName)
+            .onChange(async (value) => {
+              if (!isActivated) {
+                const check = await verifyLicenseCode(this.plugin.settings.licenseCode);
+                if (!check.valid) {
+                  new Notice("🔒 请先在上方【软件授权】中激活 Crisp ASR 软件！");
+                  return;
+                }
+              }
+              this.plugin.settings.apiKeySecretName = value;
+              await this.plugin.saveSettings();
+            })
+        );
+
+      new Setting(connection)
+        .setName("实时识别资源")
+        .setDesc("默认使用豆包流式语音识别模型 2.0 小时版。")
+        .addText((text) => text
+          .setPlaceholder("volc.seedasr.sauc.duration")
+          .setValue(this.plugin.settings.liveResourceId)
+          .onChange(async (value) => {
+            this.plugin.settings.liveResourceId = value.trim()
+              || "volc.seedasr.sauc.duration";
+            await this.plugin.saveSettings();
+          }));
+
+      new Setting(connection)
+        .setName("测试连接")
+        .setDesc("发送 0.1 秒静音样本，验证 API Key 与极速识别服务。")
+        .addButton((button) => button
+          .setButtonText("开始测试")
+          .onClick(async () => {
+            const check = await verifyLicenseCode(this.plugin.settings.licenseCode);
+            if (!check.valid) {
+              new Notice("🔒 请先在上方【软件授权】中激活 Crisp ASR 软件！");
+              return;
+            }
+            await this.plugin.testConnection();
+          }));
+    }
 
     const recognition = createSettingGroup(
       containerEl,
       "口述场景与识别增强",
-      "用场景、术语和当前笔记上下文提高识别与后续创作质量",
+      this.plugin.settings.sttEngine === "gemini"
+        ? "术语用于 Gemini 识别，场景用于后续创作"
+        : "用场景、术语和当前笔记上下文提高识别与后续创作质量",
       true,
     );
 
@@ -196,7 +332,11 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       new Setting(recognition).setName("自定义场景名称").addText((text) => text
         .setValue(this.plugin.settings.customProfileName)
         .onChange(async (value) => { this.plugin.settings.customProfileName = value.trim(); await this.plugin.saveSettings(); }));
-      new Setting(recognition).setName("场景上下文").setDesc("帮助 ASR 理解正在谈论的主题。")
+      new Setting(recognition).setName("场景上下文").setDesc(
+        this.plugin.settings.sttEngine === "gemini"
+          ? "用于分阶段创作；Gemini 识别只读取术语库。"
+          : "帮助 ASR 理解正在谈论的主题。",
+      )
         .addTextArea((text) => text.setValue(this.plugin.settings.customProfileContext).onChange(async (value) => {
           this.plugin.settings.customProfileContext = value.trim(); await this.plugin.saveSettings();
         }));
@@ -210,18 +350,20 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       .addTextArea((text) => text.setPlaceholder("Crisp ASR\nWireless Mic RX").setValue(this.plugin.settings.hotwordsText).onChange(async (value) => {
         this.plugin.settings.hotwordsText = value.trim(); await this.plugin.saveSettings();
       }));
-    new Setting(recognition).setName("火山热词 ID").setDesc("可选：填写控制台中创建的 boosting table ID。")
-      .addText((text) => text.setValue(this.plugin.settings.boostingTableId).onChange(async (value) => {
-        this.plugin.settings.boostingTableId = value.trim(); await this.plugin.saveSettings();
-      }));
-    new Setting(recognition).setName("使用当前笔记上下文").setDesc("开始听写时读取目标笔记标题和开头内容，用于识别上下文；默认关闭。")
-      .addToggle((toggle) => toggle.setValue(this.plugin.settings.useActiveNoteContext).onChange(async (value) => {
-        this.plugin.settings.useActiveNoteContext = value; await this.plugin.saveSettings();
-      }));
-    new Setting(recognition).setName("多人说话人分离").setDesc("文件转写优先使用；实时识别是否返回说话人取决于豆包资源能力。")
-      .addToggle((toggle) => toggle.setValue(this.plugin.settings.identifySpeakers).onChange(async (value) => {
-        this.plugin.settings.identifySpeakers = value; await this.plugin.saveSettings();
-      }));
+    if (this.plugin.settings.sttEngine !== "gemini") {
+      new Setting(recognition).setName("火山热词 ID").setDesc("可选：填写控制台中创建的 boosting table ID。")
+        .addText((text) => text.setValue(this.plugin.settings.boostingTableId).onChange(async (value) => {
+          this.plugin.settings.boostingTableId = value.trim(); await this.plugin.saveSettings();
+        }));
+      new Setting(recognition).setName("使用当前笔记上下文").setDesc("开始听写时读取目标笔记标题和开头内容，用于识别上下文；默认关闭。")
+        .addToggle((toggle) => toggle.setValue(this.plugin.settings.useActiveNoteContext).onChange(async (value) => {
+          this.plugin.settings.useActiveNoteContext = value; await this.plugin.saveSettings();
+        }));
+      new Setting(recognition).setName("多人说话人分离").setDesc("文件转写优先使用；实时识别是否返回说话人取决于豆包资源能力。")
+        .addToggle((toggle) => toggle.setValue(this.plugin.settings.identifySpeakers).onChange(async (value) => {
+          this.plugin.settings.identifySpeakers = value; await this.plugin.saveSettings();
+        }));
+    }
 
     // -----------------------------------------------------------------
     // 3. AI 文本处理组
@@ -234,7 +376,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     );
     new Setting(ai)
       .setName("AI 服务商")
-      .setDesc("语音识别仍使用豆包；这里只控制转写后的文字处理。")
+      .setDesc("这里只控制转写后的文字处理，不会改变上方选择的语音识别引擎。")
       .addDropdown((dropdown) => dropdown
         .addOption("ark", "火山方舟")
         .addOption("openai", "OpenAI")
@@ -263,7 +405,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       .setName("AI API Key")
       .setDesc(
         isActivated
-          ? "与豆包语音 Key 分开，由 Obsidian SecretStorage 安全保存。"
+          ? "与语音识别 Key 分开，由 Obsidian SecretStorage 安全保存。"
           : "🔒 必须先在上方【软件授权】中激活 Crisp ASR 后才能配置 AI API Key。"
       )
       .addComponent((container) =>
@@ -560,7 +702,9 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const notice = containerEl.createDiv({ cls: "crisp-asr-privacy" });
     notice.createEl("strong", { text: "数据边界" });
     notice.createEl("p", {
-      text: "启用转写后，所选文件或麦克风的声音会直接发送至火山引擎。只有手动点击智能处理时，原始转写文字才会发送至所选 AI 服务商。插件不自建中转服务器，也不会把 API Key 写入 data.json。",
+      text: `启用转写后，所选文件或麦克风的声音会直接发送至${
+        this.plugin.settings.sttEngine === "gemini" ? " Google Gemini API" : "火山引擎"
+      }。只有手动点击智能处理时，原始转写文字才会发送至所选 AI 服务商。插件不自建中转服务器，也不会把 API Key 写入 data.json。`,
     });
 
     renderAboutCard(

@@ -13,6 +13,13 @@ const AUDIO_EXTENSIONS = new Set([
 ]);
 
 const DOUBAO_FLASH_EXTENSIONS = new Set(["mp3", "ogg", "wav"]);
+const GEMINI_TRANSCRIBE_EXTENSIONS = new Set([
+  "aac",
+  "flac",
+  "mp3",
+  "ogg",
+  "wav",
+]);
 
 function extensionOf(path: string): string {
   const parts = path.split("/");
@@ -25,8 +32,34 @@ export function isAudioPath(path: string): boolean {
   return AUDIO_EXTENSIONS.has(extensionOf(path));
 }
 
-export function needsTranscoding(path: string): boolean {
-  return !DOUBAO_FLASH_EXTENSIONS.has(extensionOf(path));
+export function needsTranscoding(
+  path: string,
+  engine: "doubao" | "gemini" = "doubao",
+): boolean {
+  const supported = engine === "gemini"
+    ? GEMINI_TRANSCRIBE_EXTENSIONS
+    : DOUBAO_FLASH_EXTENSIONS;
+  return !supported.has(extensionOf(path));
+}
+
+export function geminiUploadMimeType(
+  path: string,
+  transcodedToWav: boolean,
+): string {
+  if (transcodedToWav) return "audio/wav";
+  switch (extensionOf(path)) {
+    case "aac": return "audio/aac";
+    case "flac": return "audio/flac";
+    case "mp3": return "audio/mp3";
+    case "mpeg": return "audio/mpeg";
+    case "oga":
+    case "ogg": return "audio/ogg";
+    case "opus": return "audio/opus";
+    case "webm": return "audio/webm";
+    case "m4a":
+    case "mp4": return "audio/mp4";
+    default: return "audio/wav";
+  }
 }
 
 export function mixAudioChannels(channels: Float32Array[]): Float32Array {

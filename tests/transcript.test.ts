@@ -50,6 +50,26 @@ describe("TranscriptAccumulator", () => {
     expect(renameSpeakerLabels(note, { 1: "主持人" })).toContain("**主持人：** 你好");
   });
 
+  it("groups adjacent word annotations from the same speaker into readable turns", () => {
+    const note = renderTranscriptNote({
+      title: "访谈",
+      sourcePath: "访谈.wav",
+      createdAt: "2026-08-28T00:00:00Z",
+      text: "你好 Gemini 欢迎你",
+      utterances: [
+        { text: "你好", start_time: 0, end_time: 300, definite: true, speaker: "spk_1" },
+        { text: "Gemini", start_time: 320, end_time: 600, definite: true, speaker: "spk_1" },
+        { text: "欢迎", start_time: 700, end_time: 900, definite: true, speaker: "spk_2" },
+        { text: "你", start_time: 920, end_time: 1_000, definite: true, speaker: "spk_2" },
+      ],
+    });
+
+    expect(note.match(/\*\*说话人 1：\*\*/g)).toHaveLength(1);
+    expect(note).toContain("**说话人 1：** 你好 Gemini");
+    expect(note.match(/\*\*说话人 2：\*\*/g)).toHaveLength(1);
+    expect(note).toContain("**说话人 2：** 欢迎你");
+  });
+
   it("emits a finalized utterance only once while preserving interim text", () => {
     const accumulator = new TranscriptAccumulator();
     expect(accumulator.consume({
@@ -114,6 +134,8 @@ describe("transcript output", () => {
       logId: "log-123",
     });
     expect(note).toContain("type: Note");
+    expect(note).not.toContain("topic:");
+    expect(note).not.toContain("capture_contract:");
     expect(note).toContain('source_audio: "[[attachments/Lecture.m4a]]"');
     expect(note).toContain("# Lecture 转写");
     expect(note).toContain("![[attachments/Lecture.m4a]]");

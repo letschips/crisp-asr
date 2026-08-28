@@ -110,7 +110,7 @@ ai_model: ${yamlString(input.model)}
 
 # ${input.title}
 
-> 来源：[[${input.sourcePath}]]  
+> 来源：[[${input.sourcePath}]]
 > 处理方式：${input.modeLabel}
 
 ## 智能整理

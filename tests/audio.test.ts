@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   encodePcm16Wav,
+  geminiUploadMimeType,
   float32ToPcm16Bytes,
   isAudioPath,
   mixAudioChannels,
@@ -30,6 +31,20 @@ describe("audio file routing", () => {
     expect(needsTranscoding("recording.mp3")).toBe(false);
     expect(needsTranscoding("recording.wav")).toBe(false);
     expect(needsTranscoding("recording.ogg")).toBe(false);
+  });
+
+  it("labels decoded audio as WAV instead of preserving the source container MIME", () => {
+    expect(geminiUploadMimeType("recording.m4a", true)).toBe("audio/wav");
+    expect(geminiUploadMimeType("recording.webm", true)).toBe("audio/wav");
+    expect(geminiUploadMimeType("recording.mp3", false)).toBe("audio/mp3");
+    expect(geminiUploadMimeType("recording.ogg", false)).toBe("audio/ogg");
+  });
+
+  it("keeps Gemini-native AAC and FLAC files compressed while transcoding unsupported containers", () => {
+    expect(needsTranscoding("recording.aac", "gemini")).toBe(false);
+    expect(needsTranscoding("recording.flac", "gemini")).toBe(false);
+    expect(needsTranscoding("recording.m4a", "gemini")).toBe(true);
+    expect(needsTranscoding("recording.webm", "gemini")).toBe(true);
   });
 });
 

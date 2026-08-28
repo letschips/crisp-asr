@@ -23,7 +23,12 @@ import {
   type ProcessingMetadata,
 } from "./ai-processing";
 import { verifyLicenseCode } from "./license";
-import { decodeAudioToPcmWav, isAudioPath, needsTranscoding } from "./audio";
+import {
+  decodeAudioToPcmWav,
+  geminiUploadMimeType,
+  isAudioPath,
+  needsTranscoding,
+} from "./audio";
 import { LivePcmCapture } from "./audio-capture";
 import {
   listMicrophoneDevices,
@@ -37,6 +42,11 @@ import {
   CrispAsrView,
 } from "./asr-view";
 import { transcribeFlash } from "./doubao-service";
+import {
+  transcribeGeminiFile,
+  runGeminiConnectionProbe,
+} from "./gemini-file-service";
+import type { FlashResponse } from "./flash-client";
 import {
   buildSidecarPath,
   findAudioLinkNearCursor,
@@ -70,6 +80,7 @@ import {
   type PersistedFileJob,
 } from "./settings";
 import { DoubaoStreamingClient } from "./streaming-client";
+import { GeminiStreamingClient } from "./gemini-streaming-client";
 import { SmartProcessingModal } from "./smart-modal";
 import { runCreationWorkflow } from "./creation-workflow";
 import { resolveDictationProfile, type DictationProfileId } from "./dictation-profile";
@@ -84,6 +95,7 @@ import { TranscriptionQueue } from "./transcription-queue";
 import { UntranscribedAudioModal } from "./untranscribed-modal";
 import {
   extractTranscriptResult,
+  renderAsrFrontmatter,
   renderLiveTranscriptBlock,
   renderTranscriptNote,
   TranscriptAccumulator,
@@ -123,7 +135,7 @@ export interface CrispAsrUiState {
 }
 
 interface LiveSession {
-  client: DoubaoStreamingClient;
+  client: DoubaoStreamingClient | GeminiStreamingClient;
   capture: LivePcmCapture;
   recorder?: LiveAudioRecorder;
   accumulator: TranscriptAccumulator;
@@ -133,6 +145,7 @@ interface LiveSession {
   logId?: string;
   draftId: string;
   markers: LiveMarker[];
+  provider: "Doubao" | "Gemini";
 }
 
 export function findUntranscribedAudio(
@@ -346,7 +359,7 @@ export default class CrispAsrPlugin extends Plugin {
     });
     this.addCommand({
       id: "test-connection",
-      name: "测试豆包 ASR 连接",
+      name: "测试语音识别连接",
       callback: () => void this.testConnection(),
     });
     this.addCommand({
@@ -535,13 +548,24 @@ export default class CrispAsrPlugin extends Plugin {
       this.showMissingKey();
       return;
     }
-    new Notice("Crisp ASR：正在测试豆包连接…");
-    try {
-      await runConnectionProbe(apiKey, transcribeFlash);
-      new Notice("Crisp ASR：豆包连接正常");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      new Notice(`Crisp ASR 连接测试失败：${message}`, 8_000);
+    if (this.settings.sttEngine === "gemini") {
+      new Notice("Crisp ASR：正在测试 Gemini 3.5 Transcribe 连接…");
+      try {
+        await runGeminiConnectionProbe(apiKey);
+        new Notice("Crisp ASR：Gemini 连接正常");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        new Notice(`Crisp ASR Gemini 连接测试失败：${message}`, 8_000);
+      }
+    } else {
+      new Notice("Crisp ASR：正在测试豆包连接…");
+      try {
+        await runConnectionProbe(apiKey, transcribeFlash);
+        new Notice("Crisp ASR：豆包连接正常");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        new Notice(`Crisp ASR 连接测试失败：${message}`, 8_000);
+      }
     }
   }
 
@@ -980,7 +1004,8 @@ export default class CrispAsrPlugin extends Plugin {
   ): Promise<{ outputPath: string }> {
     const apiKey = this.getApiKey();
     if (!apiKey) {
-      throw new AsrServiceError("豆包 API Key 未配置或已失效", false);
+      const engine = this.settings.sttEngine === "gemini" ? "Gemini" : "豆包";
+      throw new AsrServiceError(`${engine} API Key 未配置或已失效`, false);
     }
     const source = this.app.vault.getAbstractFileByPath(job.sourcePath);
     if (!(source instanceof TFile) || !isAudioPath(source.path)) {
@@ -991,9 +1016,13 @@ export default class CrispAsrPlugin extends Plugin {
       : null;
     const target = targetValue instanceof TFile ? targetValue : undefined;
     let audio: ArrayBuffer;
+    const transcodedToWav = needsTranscoding(
+      source.path,
+      this.settings.sttEngine,
+    );
     try {
       const binary = await this.app.vault.readBinary(source);
-      audio = needsTranscoding(source.path)
+      audio = transcodedToWav
         ? await decodeAudioToPcmWav(binary, window)
         : binary;
     } catch (error) {
@@ -1001,15 +1030,27 @@ export default class CrispAsrPlugin extends Plugin {
     }
     if (audio.byteLength > MAX_AUDIO_BYTES) {
       throw new AsrServiceError(
-        "处理后的音频超过豆包极速版 100MB 限制",
+        "处理后的音频超过插件单次处理 100MB 安全限制",
         false,
       );
     }
-    const result = await transcribeFlash(
-      apiKey,
-      audio,
-      await this.buildRecognition(target, false),
-    );
+    let result: FlashResponse;
+    if (this.settings.sttEngine === "gemini") {
+      const mimeType = geminiUploadMimeType(source.path, transcodedToWav);
+      const customVocab = this.getCustomVocabularyList();
+      result = await transcribeGeminiFile(apiKey, audio, mimeType, {
+        mode: this.settings.geminiMode,
+        identifySpeakers: this.settings.geminiIdentifySpeakers,
+        wordTimestamps: this.settings.geminiWordTimestamps,
+        customVocabulary: customVocab.length > 0 ? customVocab : undefined,
+      });
+    } else {
+      result = await transcribeFlash(
+        apiKey,
+        audio,
+        await this.buildRecognition(target, false),
+      );
+    }
     const output = await this.writeFileTranscript(source, target, result);
     this.uiState.smartTargetPath = output.path;
     this.emit();
@@ -1049,43 +1090,85 @@ export default class CrispAsrPlugin extends Plugin {
     let sessionLogId: string | undefined;
     let startupError: Error | null = null;
     let inputEndedDuringStartup = false;
-    const client = new DoubaoStreamingClient({
-      apiKey,
-      resourceId: this.settings.liveResourceId,
-      recognition,
-      onPayload: (payload) => {
-        const result = extractTranscriptResult(payload);
-        const update = accumulator.consume(result);
-        this.uiState.preview = update.preview;
-        this.uiState.finalized = accumulator.utterances();
-        const activeSession = this.liveSession;
-        if (update.added.length > 0 && activeSession?.accumulator === accumulator) {
-          this.scheduleLiveDraftCheckpoint(activeSession);
-        }
-        this.emit();
-      },
-      onError: (error) => {
-        if (this.liveSession) {
-          void this.stopLiveTranscription(error);
-        } else {
-          startupError = error;
-        }
-      },
-      onLogId: (logId) => {
-        sessionLogId = logId;
-        if (this.liveSession) {
-          this.liveSession.logId = logId;
-        }
-      },
-      onReconnecting: () => {
-        this.uiState.status = "正在重连…";
-        this.emit();
-      },
-      onReconnected: () => {
-        this.uiState.status = "正在听写";
-        this.emit();
-      },
-    });
+    let client: DoubaoStreamingClient | GeminiStreamingClient;
+    if (this.settings.sttEngine === "gemini") {
+      const customVocab = this.getCustomVocabularyList();
+      client = new GeminiStreamingClient({
+        apiKey,
+        mode: this.settings.geminiMode,
+        customVocabulary: customVocab.length > 0 ? customVocab : undefined,
+        onPayload: (payload) => {
+          const result = extractTranscriptResult(payload);
+          const update = accumulator.consume(result);
+          this.uiState.preview = update.preview;
+          this.uiState.finalized = accumulator.utterances();
+          const activeSession = this.liveSession;
+          if (update.added.length > 0 && activeSession?.accumulator === accumulator) {
+            this.scheduleLiveDraftCheckpoint(activeSession);
+          }
+          this.emit();
+        },
+        onError: (error) => {
+          if (this.liveSession) {
+            void this.stopLiveTranscription(error);
+          } else {
+            startupError = error;
+          }
+        },
+        onLogId: (logId) => {
+          sessionLogId = logId;
+          if (this.liveSession) {
+            this.liveSession.logId = logId;
+          }
+        },
+        onReconnecting: () => {
+          this.uiState.status = "正在重连…";
+          this.emit();
+        },
+        onReconnected: () => {
+          this.uiState.status = "正在听写";
+          this.emit();
+        },
+      });
+    } else {
+      client = new DoubaoStreamingClient({
+        apiKey,
+        resourceId: this.settings.liveResourceId,
+        recognition,
+        onPayload: (payload) => {
+          const result = extractTranscriptResult(payload);
+          const update = accumulator.consume(result);
+          this.uiState.preview = update.preview;
+          this.uiState.finalized = accumulator.utterances();
+          const activeSession = this.liveSession;
+          if (update.added.length > 0 && activeSession?.accumulator === accumulator) {
+            this.scheduleLiveDraftCheckpoint(activeSession);
+          }
+          this.emit();
+        },
+        onError: (error) => {
+          if (this.liveSession) {
+            void this.stopLiveTranscription(error);
+          } else {
+            startupError = error;
+          }
+        },
+        onLogId: (logId) => {
+          sessionLogId = logId;
+          if (this.liveSession) {
+            this.liveSession.logId = logId;
+          }
+        },
+        onReconnecting: () => {
+          this.uiState.status = "正在重连…";
+          this.emit();
+        },
+        onReconnected: () => {
+          this.uiState.status = "正在听写";
+          this.emit();
+        },
+      });
+    }
     const capture = new LivePcmCapture(
       window,
       (packet) => client.sendAudio(packet),
@@ -1174,6 +1257,7 @@ export default class CrispAsrPlugin extends Plugin {
         startedAtMs: Date.now(),
         draftId: randomUUID(),
         markers: [],
+        provider: this.settings.sttEngine === "gemini" ? "Gemini" : "Doubao",
         ...(sessionLogId ? { logId: sessionLogId } : {}),
       };
       this.settings.liveDraft = {
@@ -1183,6 +1267,7 @@ export default class CrispAsrPlugin extends Plugin {
         utterances: accumulator.utterances(),
         preview: this.uiState.preview,
         markers: [],
+        provider: this.liveSession.provider,
         updatedAt: Date.now(),
       };
       this.uiState.recoveryDraft = null;
@@ -1406,7 +1491,11 @@ export default class CrispAsrPlugin extends Plugin {
         );
         output = await this.app.vault.create(
           this.nextAvailablePath(preferred),
-          `---\ntype: Note\ncreated: "${draft.startedAt}"\nasr_provider: Doubao\nasr_status: Recovered\n---\n\n# ${title}${content}`,
+          `${renderAsrFrontmatter({
+            createdAt: draft.startedAt,
+            provider: draft.provider ?? "Doubao",
+            status: "Recovered",
+          })}\n# ${title}${content}`,
         );
       }
       if (this.settings.liveDraft?.id === draft.id) {
@@ -1435,8 +1524,20 @@ export default class CrispAsrPlugin extends Plugin {
     this.emit();
   }
 
+  getCustomVocabularyList(): string[] {
+    const sourceText = this.settings.geminiCustomVocabulary.trim()
+      || this.settings.hotwordsText.trim();
+    if (!sourceText) return [];
+    return sourceText
+      .split(/[\n,，]+/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
   private getApiKey(): string | null {
-    const secretName = this.settings.apiKeySecretName.trim();
+    const secretName = this.settings.sttEngine === "gemini"
+      ? this.settings.geminiApiKeySecretName.trim()
+      : this.settings.apiKeySecretName.trim();
     if (!secretName) {
       return null;
     }
@@ -1490,7 +1591,8 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   private showMissingKey(): void {
-    new Notice("请先在 Crisp ASR 设置中选择或创建豆包 API Key", 6_000);
+    const engine = this.settings.sttEngine === "gemini" ? "Gemini" : "豆包";
+    new Notice(`请先在 Crisp ASR 设置中选择或创建 ${engine} API Key`, 6_000);
   }
 
   private showMissingAiKey(): void {
@@ -1686,6 +1788,7 @@ export default class CrispAsrPlugin extends Plugin {
       text: result.text,
       utterances: result.utterances,
       logId: result.logId,
+      provider: this.settings.sttEngine === "gemini" ? "Gemini" : "Doubao",
     });
     const created = await this.app.vault.create(path, note);
     await this.app.workspace.getLeaf(false).openFile(created);
@@ -1722,7 +1825,10 @@ export default class CrispAsrPlugin extends Plugin {
     const path = this.nextAvailablePath(preferred);
     const created = await this.app.vault.create(
       path,
-      `---\ntype: Note\ncreated: "${session.startedAt}"\nasr_provider: Doubao\n---\n\n# ${title}${block}`,
+      `${renderAsrFrontmatter({
+        createdAt: session.startedAt,
+        provider: session.provider,
+      })}\n# ${title}${block}`,
     );
     await this.app.workspace.getLeaf(false).openFile(created);
     return created;

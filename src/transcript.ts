@@ -134,6 +134,27 @@ function yamlString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+export function renderAsrFrontmatter(input: {
+  createdAt: string;
+  provider: string;
+  status?: "Completed" | "Recovered";
+  sourcePath?: string;
+  logId?: string;
+}): string {
+  const source = input.sourcePath
+    ? `source_audio: ${yamlString(`[[${input.sourcePath}]]`)}\n`
+    : "";
+  const logId = input.logId
+    ? `log_id: ${input.logId.replace(/[^a-zA-Z0-9_-]/g, "")}\n`
+    : "";
+  return `---
+type: Note
+${source}created: ${yamlString(input.createdAt)}
+asr_provider: ${yamlString(input.provider)}
+${input.status ? `asr_status: ${input.status}\n` : ""}${logId}---
+`;
+}
+
 export function renderTranscriptNote(input: {
   title: string;
   sourcePath: string;
@@ -141,6 +162,7 @@ export function renderTranscriptNote(input: {
   text: string;
   utterances: TranscriptUtterance[];
   logId?: string;
+  provider?: string;
 }): string {
   const speakerText = renderSpeakerTranscript(input.utterances);
   const timeline = input.utterances.length > 0
@@ -148,17 +170,13 @@ export function renderTranscriptNote(input: {
       `- \`${formatTimestamp(utterance.start_time)}\` ${utterance.text}`
     ).join("\n")
     : input.text.split(/\n+/).map((line) => `- ${line}`).join("\n");
-  const logId = input.logId
-    ? `log_id: ${input.logId.replace(/[^a-zA-Z0-9_-]/g, "")}\n`
-    : "";
-  return `---
-type: Note
-source_audio: ${yamlString(`[[${input.sourcePath}]]`)}
-created: ${yamlString(input.createdAt)}
-asr_provider: Doubao
-asr_status: Completed
-${logId}---
-
+  return `${renderAsrFrontmatter({
+    createdAt: input.createdAt,
+    provider: input.provider ?? "Doubao",
+    status: "Completed",
+    sourcePath: input.sourcePath,
+    ...(input.logId ? { logId: input.logId } : {}),
+  })}
 # ${input.title}
 
 ![[${input.sourcePath}]]
@@ -189,14 +207,35 @@ export function renderLiveTranscriptBlock(input: {
 export function renderSpeakerTranscript(utterances: readonly TranscriptUtterance[]): string {
   if (!utterances.some((item) => item.speaker !== undefined)) return "";
   const names = new Map<string, number>();
-  const lines: string[] = [];
+  const turns: Array<{ speaker: string; text: string }> = [];
   for (const utterance of utterances) {
     const id = utterance.speaker ?? "unknown";
     if (!names.has(id)) names.set(id, names.size + 1);
-    const number = names.get(id)!;
-    lines.push(`<!-- crisp-asr-speaker:${number} -->\n**说话人 ${number}：** ${utterance.text}`);
+    const previous = turns[turns.length - 1];
+    if (previous?.speaker === id) {
+      previous.text = joinTranscriptTokens(previous.text, utterance.text);
+    } else {
+      turns.push({ speaker: id, text: utterance.text });
+    }
   }
-  return lines.join("\n\n");
+  return turns.map((turn) => {
+    const number = names.get(turn.speaker)!;
+    return `<!-- crisp-asr-speaker:${number} -->\n**说话人 ${number}：** ${turn.text}`;
+  }).join("\n\n");
+}
+
+function joinTranscriptTokens(current: string, next: string): string {
+  const left = current.trimEnd();
+  const right = next.trimStart();
+  if (!left) return right;
+  if (!right) return left;
+  if (/^[,.;:!?，。！？；：、）》】}]/.test(right)) return left + right;
+  if (/[(（《【{]$/.test(left)) return left + right;
+  const cjk = "\\u3400-\\u9fff\\u3040-\\u30ff\\uac00-\\ud7af";
+  if (new RegExp(`[${cjk}]$`).test(left) && new RegExp(`^[${cjk}]`).test(right)) {
+    return left + right;
+  }
+  return `${left} ${right}`;
 }
 
 export function renameSpeakerLabels(markdown: string, names: Record<number, string>): string {
