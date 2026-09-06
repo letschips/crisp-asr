@@ -396,6 +396,90 @@ export default {
       }
     }
 
+    if (request.method === "POST" && url.pathname === "/api/query-license") {
+      try {
+        const body = await request.json();
+        const adminError = requireAdmin(body, env);
+        if (adminError) return adminError;
+
+        const rawQuery = (body.query || body.licenseCode || body.licenseId || "").trim();
+        const licenseId = parseLicenseIdFromCode(rawQuery) || rawQuery;
+        if (!licenseId) {
+          return new Response(
+            JSON.stringify({ error: "请输入有效的卡密或 licenseId" }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        const record = await getIssuedRecord(env, licenseId);
+        let revoked = !!record?.revoked;
+        let revokedAt = record?.revokedAt || null;
+        let revokeReason = record?.revokeReason || null;
+
+        let activeDevices = [];
+        let deviceInfo = {};
+        let logs = [];
+
+        if (env.LICENSE_KV) {
+          const revokedRaw = await env.LICENSE_KV.get(`revoked:${licenseId}`);
+          if (revokedRaw) {
+            try {
+              const r = JSON.parse(revokedRaw);
+              revoked = true;
+              revokedAt = r.revokedAt || revokedAt;
+              revokeReason = r.reason || revokeReason;
+            } catch {}
+          }
+
+          const rawDevices = await env.LICENSE_KV.get(`license_devices:${licenseId}`);
+          if (rawDevices) {
+            try { activeDevices = JSON.parse(rawDevices); } catch (e) {}
+            if (!Array.isArray(activeDevices)) activeDevices = [];
+          }
+
+          const rawDevInfo = await env.LICENSE_KV.get(`license_device_info:${licenseId}`);
+          if (rawDevInfo) {
+            try { deviceInfo = JSON.parse(rawDevInfo); } catch (e) {}
+            if (!deviceInfo || typeof deviceInfo !== "object") deviceInfo = {};
+          }
+
+          const rawLogs = await env.LICENSE_KV.get(`license_logs:${licenseId}`);
+          if (rawLogs) {
+            try { logs = JSON.parse(rawLogs); } catch (e) {}
+            if (!Array.isArray(logs)) logs = [];
+          }
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            found: !!(record || activeDevices.length > 0 || logs.length > 0),
+            licenseId,
+            userName: record?.userName || "未知买家",
+            product: record?.product || "Crisp Suite",
+            featureType: record?.featureType || "all",
+            days: record?.days || null,
+            maxDevices: record?.maxDevices || 3,
+            issuedAt: record?.issuedAt || null,
+            expiresAt: record?.expiresAt || null,
+            revoked,
+            revokedAt,
+            revokeReason,
+            activeDeviceCount: activeDevices.length,
+            activeDevices,
+            deviceInfo,
+            logs
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        );
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
     // -------------------------------------------------------------------------
     // 2. Obsidian 插件在线激活 / 解绑 / 校验设备限制 API
     // -------------------------------------------------------------------------
@@ -466,17 +550,61 @@ export default {
         // 检查 KV 数据库约束（如果用户绑定了 Cloudflare KV）
         const maxDevices = payload.maxDevices || 3;
         const kvKey = `license_devices:${payload.licenseId}`;
+        const devInfoKey = `license_device_info:${payload.licenseId}`;
+        const logsKey = `license_logs:${payload.licenseId}`;
         let activeDevices = [];
+
+        // 提取客户端 IP 与地理归属信息
+        const clientIp = request.headers.get("CF-Connecting-IP") ||
+                         request.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() ||
+                         request.headers.get("x-real-ip") ||
+                         "未知IP";
+        const cfData = request.cf || {};
+        const clientCity = cfData.city || "";
+        const clientRegion = cfData.region || "";
+        const clientCountry = cfData.country || "";
+        const locParts = [clientCountry, clientRegion, clientCity].filter(Boolean);
+        const clientLocation = locParts.length > 0 ? locParts.join(" ") : "未知位置";
+        const nowIso = new Date().toISOString();
 
         if (env.LICENSE_KV) {
           const rawKv = await env.LICENSE_KV.get(kvKey);
           if (rawKv) {
             try { activeDevices = JSON.parse(rawKv); } catch (e) {}
+            if (!Array.isArray(activeDevices)) activeDevices = [];
+          }
+
+          let devInfo = {};
+          const rawDevInfo = await env.LICENSE_KV.get(devInfoKey);
+          if (rawDevInfo) {
+            try { devInfo = JSON.parse(rawDevInfo); } catch (e) {}
+            if (!devInfo || typeof devInfo !== "object") devInfo = {};
+          }
+
+          let logs = [];
+          const rawLogs = await env.LICENSE_KV.get(logsKey);
+          if (rawLogs) {
+            try { logs = JSON.parse(rawLogs); } catch (e) {}
+            if (!Array.isArray(logs)) logs = [];
           }
 
           if (action === "deactivate") {
             activeDevices = activeDevices.filter(id => id !== deviceId);
+            delete devInfo[deviceId];
+            logs.unshift({
+              time: nowIso,
+              action: "deactivate",
+              deviceId,
+              pluginId: pluginId || "unknown",
+              ip: clientIp,
+              location: clientLocation
+            });
+            if (logs.length > 50) logs = logs.slice(0, 50);
+
             await env.LICENSE_KV.put(kvKey, JSON.stringify(activeDevices));
+            await env.LICENSE_KV.put(devInfoKey, JSON.stringify(devInfo));
+            await env.LICENSE_KV.put(logsKey, JSON.stringify(logs));
+
             return new Response(JSON.stringify({
               valid: true,
               deactivated: true,
@@ -489,14 +617,47 @@ export default {
           // 激活逻辑
           if (!activeDevices.includes(deviceId)) {
             if (activeDevices.length >= maxDevices) {
+              logs.unshift({
+                time: nowIso,
+                action: "rejected_max_devices",
+                deviceId,
+                pluginId: pluginId || "unknown",
+                ip: clientIp,
+                location: clientLocation
+              });
+              if (logs.length > 50) logs = logs.slice(0, 50);
+              await env.LICENSE_KV.put(logsKey, JSON.stringify(logs));
+
               return new Response(JSON.stringify({
                 valid: false,
                 reason: `该卡密激活设备数已达上限 (${activeDevices.length}/${maxDevices} 台设备)，无法在第 ${activeDevices.length + 1} 台设备上激活。`
               }), { status: 403, headers: { "Content-Type": "application/json" } });
             }
             activeDevices.push(deviceId);
-            await env.LICENSE_KV.put(kvKey, JSON.stringify(activeDevices));
           }
+
+          const existingDev = devInfo[deviceId] || {};
+          devInfo[deviceId] = {
+            firstSeen: existingDev.firstSeen || nowIso,
+            lastSeen: nowIso,
+            ip: clientIp,
+            location: clientLocation,
+            lastPlugin: pluginId || existingDev.lastPlugin || "unknown"
+          };
+
+          logs.unshift({
+            time: nowIso,
+            action: action || "activate",
+            deviceId,
+            pluginId: pluginId || "unknown",
+            ip: clientIp,
+            location: clientLocation
+          });
+          if (logs.length > 50) logs = logs.slice(0, 50);
+
+          await env.LICENSE_KV.put(kvKey, JSON.stringify(activeDevices));
+          await env.LICENSE_KV.put(devInfoKey, JSON.stringify(devInfo));
+          await env.LICENSE_KV.put(logsKey, JSON.stringify(logs));
         }
 
         return new Response(JSON.stringify({
@@ -613,6 +774,10 @@ export default {
             <input type="text" id="revokeCode" placeholder="粘贴要处理的卡密或 licenseId">
         </div>
 
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <button class="btn-submit" style="background:#007aff;" onclick="queryLicense()">🔍 查激活 IP 与设备</button>
+        </div>
+
         <div style="display:flex; gap:8px;">
             <button class="btn-submit" style="background:#ff3b30;" onclick="revokeLicense(true)">吊销激活</button>
             <button class="btn-submit" style="background:#34c759;" onclick="revokeLicense(false)">恢复激活</button>
@@ -624,12 +789,70 @@ export default {
 
         <div class="result-box" id="adminResultBox">
             <div class="result-info" id="adminResultInfo"></div>
-            <textarea id="adminOutput" readonly></textarea>
+            <textarea id="adminOutput" style="height:180px;" readonly></textarea>
             <button class="btn-copy" onclick="copyAdminOutput()">📋 复制</button>
         </div>
     </div>
 
     <script>
+        async function queryLicense() {
+            const password = document.getElementById('adminPassword').value;
+            const query = document.getElementById('revokeCode').value.trim();
+            if (!password) { alert('请输入管理员密码'); return; }
+            if (!query) { alert('请输入卡密或 licenseId'); return; }
+
+            const res = await fetch('/api/query-license', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password, query })
+            });
+            const data = await res.json();
+            const box = document.getElementById('adminResultBox');
+            box.classList.add('active');
+
+            if (!res.ok || !data.success) {
+                document.getElementById('adminResultInfo').innerText = '❌ 查询失败：' + (data.error || '未找到该卡密记录');
+                document.getElementById('adminOutput').value = JSON.stringify(data, null, 2);
+                return;
+            }
+
+            document.getElementById('adminResultInfo').innerText =
+                '✅ 查得授权：' + data.userName + ' (' + data.licenseId + ') [' + (data.revoked ? '🚫 已吊销' : '🟢 正常') + ']';
+
+            let report = '【授权信息】\n';
+            report += '卡密 ID: ' + data.licenseId + '\n';
+            report += '买家用户名: ' + data.userName + '\n';
+            report += '状态: ' + (data.revoked ? '🚫 已吊销 (' + (data.revokeReason || '管理员吊销') + ')' : '🟢 正常有效') + '\n';
+            report += '有效时长: ' + (data.days ? data.days + ' 天' : '永久') + '\n';
+            report += '签发时间: ' + (data.issuedAt ? data.issuedAt.replace('T', ' ').substring(0, 19) : '未知') + '\n';
+            report += '到期时间: ' + (data.expiresAt ? data.expiresAt.replace('T', ' ').substring(0, 10) : '永久') + '\n';
+            report += '已激活设备: ' + data.activeDeviceCount + ' / ' + data.maxDevices + ' 台\n\n';
+
+            report += '【当前绑定设备与 IP 明细】\n';
+            if (data.activeDevices && data.activeDevices.length > 0) {
+                data.activeDevices.forEach((devId, idx) => {
+                    const info = (data.deviceInfo && data.deviceInfo[devId]) || {};
+                    report += (idx + 1) + '. 设备: ' + devId + '\n';
+                    report += '   激活 IP: ' + (info.ip || '未记录 (早期激活)') + '\n';
+                    report += '   归属位置: ' + (info.location || '未知') + '\n';
+                    report += '   最后活跃: ' + (info.lastSeen ? info.lastSeen.replace('T', ' ').substring(0, 19) : '未知') + ' (' + (info.lastPlugin || '无') + ')\n';
+                });
+            } else {
+                report += '暂无激活设备（该卡密尚未在任何设备上激活）\n';
+            }
+
+            report += '\n【近期激活与校验日志流水 (最新 ' + (data.logs ? data.logs.length : 0) + ' 条)】\n';
+            if (data.logs && data.logs.length > 0) {
+                data.logs.forEach((log, idx) => {
+                    const timeStr = log.time ? log.time.replace('T', ' ').substring(0, 19) : '';
+                    report += '[' + timeStr + '] 动作: ' + log.action + ' | IP: ' + log.ip + ' (' + log.location + ') | 插件: ' + log.pluginId + ' | 设备: ' + log.deviceId + '\n';
+                });
+            } else {
+                report += '暂无日志流水记录\n';
+            }
+
+            document.getElementById('adminOutput').value = report;
+        }
         async function generateLicense() {
             const password = document.getElementById('password').value;
             const name = document.getElementById('userName').value.trim();
