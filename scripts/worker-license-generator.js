@@ -819,39 +819,40 @@ export default {
             document.getElementById('adminResultInfo').innerText =
                 '✅ 查得授权：' + data.userName + ' (' + data.licenseId + ') [' + (data.revoked ? '🚫 已吊销' : '🟢 正常') + ']';
 
-            let report = '【授权信息】\n';
-            report += '卡密 ID: ' + data.licenseId + '\n';
-            report += '买家用户名: ' + data.userName + '\n';
-            report += '状态: ' + (data.revoked ? '🚫 已吊销 (' + (data.revokeReason || '管理员吊销') + ')' : '🟢 正常有效') + '\n';
-            report += '有效时长: ' + (data.days ? data.days + ' 天' : '永久') + '\n';
-            report += '签发时间: ' + (data.issuedAt ? data.issuedAt.replace('T', ' ').substring(0, 19) : '未知') + '\n';
-            report += '到期时间: ' + (data.expiresAt ? data.expiresAt.replace('T', ' ').substring(0, 10) : '永久') + '\n';
-            report += '已激活设备: ' + data.activeDeviceCount + ' / ' + data.maxDevices + ' 台\n\n';
-
-            report += '【当前绑定设备与 IP 明细】\n';
+            let lines = [];
+            lines.push('【授权信息】');
+            lines.push('卡密 ID: ' + data.licenseId);
+            lines.push('买家用户名: ' + data.userName);
+            lines.push('状态: ' + (data.revoked ? '🚫 已吊销 (' + (data.revokeReason || '管理员吊销') + ')' : '🟢 正常有效'));
+            lines.push('有效时长: ' + (data.days ? data.days + ' 天' : '永久'));
+            lines.push('签发时间: ' + (data.issuedAt ? data.issuedAt.replace('T', ' ').substring(0, 19) : '未知'));
+            lines.push('到期时间: ' + (data.expiresAt ? data.expiresAt.replace('T', ' ').substring(0, 10) : '永久'));
+            lines.push('已激活设备: ' + data.activeDeviceCount + ' / ' + data.maxDevices + ' 台');
+            lines.push('');
+            lines.push('【当前绑定设备与 IP 明细】');
             if (data.activeDevices && data.activeDevices.length > 0) {
                 data.activeDevices.forEach((devId, idx) => {
                     const info = (data.deviceInfo && data.deviceInfo[devId]) || {};
-                    report += (idx + 1) + '. 设备: ' + devId + '\n';
-                    report += '   激活 IP: ' + (info.ip || '未记录 (早期激活)') + '\n';
-                    report += '   归属位置: ' + (info.location || '未知') + '\n';
-                    report += '   最后活跃: ' + (info.lastSeen ? info.lastSeen.replace('T', ' ').substring(0, 19) : '未知') + ' (' + (info.lastPlugin || '无') + ')\n';
+                    lines.push((idx + 1) + '. 设备: ' + devId);
+                    lines.push('   激活 IP: ' + (info.ip || '未记录 (早期激活)'));
+                    lines.push('   归属位置: ' + (info.location || '未知'));
+                    lines.push('   最后活跃: ' + (info.lastSeen ? info.lastSeen.replace('T', ' ').substring(0, 19) : '未知') + ' (' + (info.lastPlugin || '无') + ')');
                 });
             } else {
-                report += '暂无激活设备（该卡密尚未在任何设备上激活）\n';
+                lines.push('暂无激活设备（该卡密尚未在任何设备上激活）');
             }
-
-            report += '\n【近期激活与校验日志流水 (最新 ' + (data.logs ? data.logs.length : 0) + ' 条)】\n';
+            lines.push('');
+            lines.push('【近期激活与校验日志流水 (最新 ' + (data.logs ? data.logs.length : 0) + ' 条)】');
             if (data.logs && data.logs.length > 0) {
                 data.logs.forEach((log, idx) => {
                     const timeStr = log.time ? log.time.replace('T', ' ').substring(0, 19) : '';
-                    report += '[' + timeStr + '] 动作: ' + log.action + ' | IP: ' + log.ip + ' (' + log.location + ') | 插件: ' + log.pluginId + ' | 设备: ' + log.deviceId + '\n';
+                    lines.push('[' + timeStr + '] 动作: ' + log.action + ' | IP: ' + log.ip + ' (' + log.location + ') | 插件: ' + log.pluginId + ' | 设备: ' + log.deviceId);
                 });
             } else {
-                report += '暂无日志流水记录\n';
+                lines.push('暂无日志流水记录');
             }
 
-            document.getElementById('adminOutput').value = report;
+            document.getElementById('adminOutput').value = lines.join(String.fromCharCode(10));
         }
         async function generateLicense() {
             const password = document.getElementById('password').value;
