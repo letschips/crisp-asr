@@ -40,9 +40,10 @@ function issueLicense() {
   const expireDate = new Date();
   expireDate.setDate(expireDate.getDate() + days);
 
+  const randSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
   const payload = {
     product: "Crisp Suite",
-    licenseId: `CRISP-${Date.now().toString(36).toUpperCase()}`,
+    licenseId: `CRISP-${Date.now().toString(36).toUpperCase()}-${randSuffix}`,
     userName: name,
     issuedAt: issueDate.toISOString(),
     expiresAt: expireDate.toISOString(),

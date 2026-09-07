@@ -50,4 +50,24 @@ describe("license online check", () => {
     const result = await verifyLicenseCode(VALID_SIGNED_CODE, "crisp-asr");
     expect(result.valid).toBe(true);
   });
+
+  it("falls back to offline-valid on 500 server error to protect legitimate users", async () => {
+    requestUrlMock.mockResolvedValueOnce({
+      status: 500,
+      json: { valid: false, errorType: "server_error", reason: "服务器验证出错" },
+    });
+    const result = await verifyLicenseCode(VALID_SIGNED_CODE, "crisp-asr");
+    expect(result.valid).toBe(true);
+  });
+
+  it("passes throw: false to requestUrl so 403/400 errors are not swallowed as network errors", async () => {
+    requestUrlMock.mockResolvedValueOnce({
+      status: 403,
+      json: { valid: false, reason: "该卡密激活设备数已达上限" },
+    });
+    await verifyLicenseCode(VALID_SIGNED_CODE, "crisp-asr");
+    expect(requestUrlMock).toHaveBeenCalledWith(
+      expect.objectContaining({ throw: false })
+    );
+  });
 });

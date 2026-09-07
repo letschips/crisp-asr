@@ -167,9 +167,10 @@ export default {
         const expireDate = new Date();
         expireDate.setDate(expireDate.getDate() + days);
 
+        const randSuffix = crypto.randomUUID().slice(0, 6).toUpperCase();
         const payload = {
           product: "Crisp Suite",
-          licenseId: `CRISP-${Date.now().toString(36).toUpperCase()}`,
+          licenseId: `CRISP-${Date.now().toString(36).toUpperCase()}-${randSuffix}`,
           userName: name,
           issuedAt: issueDate.toISOString(),
           expiresAt: expireDate.toISOString(),
@@ -614,7 +615,8 @@ export default {
             }), { headers: { "Content-Type": "application/json" } });
           }
 
-          // 激活逻辑
+          // 激活逻辑与限写优化
+          let isNewDevice = false;
           if (!activeDevices.includes(deviceId)) {
             if (activeDevices.length >= maxDevices) {
               logs.unshift({
@@ -634,30 +636,43 @@ export default {
               }), { status: 403, headers: { "Content-Type": "application/json" } });
             }
             activeDevices.push(deviceId);
+            isNewDevice = true;
           }
 
           const existingDev = devInfo[deviceId] || {};
-          devInfo[deviceId] = {
-            firstSeen: existingDev.firstSeen || nowIso,
-            lastSeen: nowIso,
-            ip: clientIp,
-            location: clientLocation,
-            lastPlugin: pluginId || existingDev.lastPlugin || "unknown"
-          };
+          const isIpChanged = existingDev.ip && existingDev.ip !== clientIp;
+          const lastSeenMs = existingDev.lastSeen ? new Date(existingDev.lastSeen).getTime() : 0;
+          const isHeartbeatExpired = (Date.now() - lastSeenMs) > 24 * 60 * 60 * 1000; // 24小时内同IP同设备不重复写KV
 
-          logs.unshift({
-            time: nowIso,
-            action: action || "activate",
-            deviceId,
-            pluginId: pluginId || "unknown",
-            ip: clientIp,
-            location: clientLocation
-          });
-          if (logs.length > 50) logs = logs.slice(0, 50);
+          // 核心优化：仅在新设备绑定、IP发生变更、或距上次心跳超24小时时才写入KV，避免每次日常校验产生3次写入吃光免费配额
+          const shouldWriteAudit = isNewDevice || isIpChanged || isHeartbeatExpired;
 
-          await env.LICENSE_KV.put(kvKey, JSON.stringify(activeDevices));
-          await env.LICENSE_KV.put(devInfoKey, JSON.stringify(devInfo));
-          await env.LICENSE_KV.put(logsKey, JSON.stringify(logs));
+          if (isNewDevice) {
+            await env.LICENSE_KV.put(kvKey, JSON.stringify(activeDevices));
+          }
+
+          if (shouldWriteAudit) {
+            devInfo[deviceId] = {
+              firstSeen: existingDev.firstSeen || nowIso,
+              lastSeen: nowIso,
+              ip: clientIp,
+              location: clientLocation,
+              lastPlugin: pluginId || existingDev.lastPlugin || "unknown"
+            };
+
+            logs.unshift({
+              time: nowIso,
+              action: isNewDevice ? "activate_new_device" : (isIpChanged ? "ip_changed" : "heartbeat_sync"),
+              deviceId,
+              pluginId: pluginId || "unknown",
+              ip: clientIp,
+              location: clientLocation
+            });
+            if (logs.length > 50) logs = logs.slice(0, 50);
+
+            await env.LICENSE_KV.put(devInfoKey, JSON.stringify(devInfo));
+            await env.LICENSE_KV.put(logsKey, JSON.stringify(logs));
+          }
         }
 
         return new Response(JSON.stringify({
@@ -669,7 +684,11 @@ export default {
         }), { headers: { "Content-Type": "application/json" } });
 
       } catch (err) {
-        return new Response(JSON.stringify({ valid: false, reason: `服务器验证出错: ${err.message}` }), {
+        return new Response(JSON.stringify({
+          valid: false,
+          errorType: "server_error",
+          reason: `服务器验证出错: ${err.message}`
+        }), {
           status: 500,
           headers: { "Content-Type": "application/json" }
         });
