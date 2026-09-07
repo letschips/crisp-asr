@@ -18,7 +18,7 @@
     "gemini"
   ],
   "author": "小红书 letschips",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "ws": "^8.18.3"
   },
@@ -31,5 +31,6 @@
     "obsidian": "^1.13.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
-  }
+  },
+  "private": true
 }
