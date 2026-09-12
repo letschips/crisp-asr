@@ -1,6 +1,6 @@
 {
   "name": "crisp-asr",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Doubao and Gemini 3.5 speech recognition for Obsidian with optional multi-provider AI polishing and extraction.",
   "main": "main.js",
   "type": "module",
