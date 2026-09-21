@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { arrayBufferToBase64, safeRandomUUID } from "./platform-crypto";
 import { requestUrl } from "obsidian";
 import {
   buildFlashRequest,
@@ -17,7 +17,7 @@ export async function transcribeFlash(
   audio: ArrayBuffer,
   recognition?: RecognitionEnhancement,
 ): Promise<FlashResponse> {
-  const base64 = Buffer.from(audio).toString("base64");
+  const base64 = arrayBufferToBase64(audio);
   let response;
   try {
     response = await requestUrl({
@@ -27,7 +27,7 @@ export async function transcribeFlash(
       headers: {
         "X-Api-Key": apiKey,
         "X-Api-Resource-Id": FLASH_RESOURCE_ID,
-        "X-Api-Request-Id": randomUUID(),
+        "X-Api-Request-Id": safeRandomUUID(),
         "X-Api-Sequence": "-1",
       },
       body: JSON.stringify(buildFlashRequest(

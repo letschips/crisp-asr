@@ -343,3 +343,14 @@ export async function requestUrl(): Promise<never> {
 }
 
 export function setIcon(): void {}
+export function addIcon(_name: string, _svg: string): void {}
+
+export const Platform = {
+  isMobile: false,
+  isDesktop: true,
+  isIosApp: false,
+  isAndroidApp: false,
+  isMacOS: true,
+  isWin: false,
+  isLinux: false,
+};

@@ -129,8 +129,8 @@ export class LiveAudioMixer {
     }
     const context = new this.ownerWindow.AudioContext();
     this.context = context;
-    if (context.state === "suspended") {
-      await context.resume();
+    if (context.state !== "running") {
+      await context.resume().catch(() => undefined);
     }
     const compressor = context.createDynamicsCompressor();
     compressor.threshold.value = -12;
@@ -149,13 +149,27 @@ export class LiveAudioMixer {
     const processor = context.createScriptProcessor(4_096, 1, 1);
     const silentGain = context.createGain();
     const recordingDestination = context.createMediaStreamDestination();
-    silentGain.gain.value = 0;
+    // Use an inaudible non-zero gain (1e-6, -120dB) to prevent WebKit dead-code elimination / mute optimization
+    silentGain.gain.value = 0.000001;
     this.processor = processor;
     this.silentGain = silentGain;
     this.recordingDestination = recordingDestination;
     this.pcmRunning = true;
 
+    // Retain global reference to prevent WebKit GC from collecting active processor
+    const win = this.ownerWindow as any;
+    if (!win.__CRISP_ASR_ACTIVE_NODES__) {
+      win.__CRISP_ASR_ACTIVE_NODES__ = new Set();
+    }
+    win.__CRISP_ASR_ACTIVE_NODES__.add(processor);
+    for (const src of this.sources) {
+      win.__CRISP_ASR_ACTIVE_NODES__.add(src);
+    }
+
     processor.onaudioprocess = (event) => {
+      if (context.state === "suspended") {
+        void context.resume();
+      }
       const input = event.inputBuffer.getChannelData(0);
       const nextLevel = calculateRmsLevel(input);
       this.level = smoothInputLevel(this.level, nextLevel);
@@ -189,6 +203,8 @@ export class LiveAudioMixer {
     this.pcmRunning = false;
     this.silenceMonitor?.reset();
     if (this.processor) {
+      const win = this.ownerWindow as any;
+      win.__CRISP_ASR_ACTIVE_NODES__?.delete(this.processor);
       this.processor.onaudioprocess = null;
       this.compressor?.disconnect(this.processor);
       this.processor.disconnect();
@@ -204,7 +220,9 @@ export class LiveAudioMixer {
 
   async close(): Promise<void> {
     this.stopPcm();
+    const win = this.ownerWindow as any;
     for (const source of this.sources) {
+      win.__CRISP_ASR_ACTIVE_NODES__?.delete(source);
       source.disconnect();
     }
     this.sources = [];

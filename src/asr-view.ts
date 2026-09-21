@@ -7,6 +7,7 @@ import type CrispAsrPlugin from "./main";
 import type { PersistedFileJob } from "./settings";
 import type { PersistedLiveDraft } from "./live-draft";
 import { DICTATION_PROFILES } from "./dictation-profile";
+import { CRISP_ASR_ICON_ID, ICON_BARS_SCALE_MIDDLE_SVG } from "./icon";
 
 export const CRISP_ASR_VIEW_TYPE = "crisp-asr";
 
@@ -101,7 +102,7 @@ export class CrispAsrView extends ItemView {
   }
 
   getIcon(): string {
-    return "audio-lines";
+    return CRISP_ASR_ICON_ID;
   }
 
   async onOpen(): Promise<void> {
@@ -222,9 +223,7 @@ export class CrispAsrView extends ItemView {
     identity.className = "crisp-asr-identity";
     const mark = document.createElement("span");
     mark.className = `crisp-asr-mark is-${state.mode}`;
-    for (let index = 0; index < 4; index += 1) {
-      mark.append(document.createElement("i"));
-    }
+    mark.innerHTML = ICON_BARS_SCALE_MIDDLE_SVG;
     const heading = document.createElement("div");
     const title = document.createElement("h2");
     title.textContent = "Crisp ASR";

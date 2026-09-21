@@ -1,4 +1,4 @@
-const WEBM_OPUS_MIME = "audio/webm;codecs=opus";
+export const WEBM_OPUS_MIME = "audio/webm;codecs=opus";
 const RECORDING_TIMESLICE_MS = 1_000;
 
 export interface BinaryVaultAdapter {
@@ -7,11 +7,84 @@ export interface BinaryVaultAdapter {
   writeBinary: (path: string, data: ArrayBuffer) => Promise<void>;
 }
 
+export interface RecordingMimeConfig {
+  mimeType: string;
+  extension: string;
+}
+
+const RECORDING_MIME_CANDIDATES = [
+  WEBM_OPUS_MIME,
+  "audio/webm",
+  "audio/mp4",
+  "audio/mp4;codecs=mp4a.40.2",
+  "audio/mp4;codecs=mp4a.40.5",
+  "audio/aac",
+];
+
+export function recordingExtensionForMime(mimeType: string): string {
+  const normalized = (mimeType || "").toLowerCase();
+  if (
+    normalized.includes("mp4")
+    || normalized.includes("m4a")
+  ) {
+    return "mp4";
+  }
+  if (normalized.includes("aac")) {
+    return "aac";
+  }
+  if (normalized.includes("ogg")) {
+    return "ogg";
+  }
+  return "webm";
+}
+
+// Returns the first supported MIME type, null when the probe ran and no
+// candidate was supported, or undefined when the probe itself is unavailable.
+function probeSupportedRecordingMime(
+  Recorder: typeof MediaRecorder,
+): string | null | undefined {
+  if (!Recorder || typeof Recorder.isTypeSupported !== "function") {
+    return undefined;
+  }
+  let probed = false;
+  for (const candidate of RECORDING_MIME_CANDIDATES) {
+    let supported = false;
+    try {
+      supported = Recorder.isTypeSupported(candidate);
+      probed = true;
+    } catch {
+      continue;
+    }
+    if (supported) {
+      return candidate;
+    }
+  }
+  return probed ? null : undefined;
+}
+
+export function resolveSupportedRecordingMime(
+  Recorder: typeof MediaRecorder,
+): RecordingMimeConfig {
+  const probed = probeSupportedRecordingMime(Recorder);
+  if (typeof probed === "string") {
+    return {
+      mimeType: probed,
+      extension: recordingExtensionForMime(probed),
+    };
+  }
+  // Let the recorder choose its default. Safari can support audio/mp4 while
+  // exposing no reliable isTypeSupported probe, and forcing WebM breaks it.
+  return { mimeType: "", extension: "webm" };
+}
+
 export function assertLiveRecordingSupported(
   Recorder: typeof MediaRecorder,
 ): void {
-  if (!Recorder || !Recorder.isTypeSupported(WEBM_OPUS_MIME)) {
-    throw new Error("当前 Obsidian 环境不支持 WebM/Opus 录音");
+  if (!Recorder) {
+    throw new Error("当前环境不支持实时录音");
+  }
+  if (probeSupportedRecordingMime(Recorder) === null) {
+    throw new Error("当前 Obsidian 环境不支持 WebM/Opus 或 MP4 录音");
   }
 }
 
@@ -29,14 +102,15 @@ export async function nextLiveAudioPath(
   folder: string,
   date: Date,
   exists: (path: string) => Promise<boolean>,
+  extension = "webm",
 ): Promise<string> {
   const stem = `${folder}/${recordingStem(date)}`;
-  const preferred = `${stem}.webm`;
+  const preferred = `${stem}.${extension}`;
   if (!(await exists(preferred))) {
     return preferred;
   }
   for (let index = 2; index < 1_000; index += 1) {
-    const candidate = `${stem}-${index}.webm`;
+    const candidate = `${stem}-${index}.${extension}`;
     if (!(await exists(candidate))) {
       return candidate;
     }
@@ -70,6 +144,10 @@ export class LiveAudioRecorder {
   private chunks: Blob[] = [];
   private stopPromise: Promise<string> | null = null;
   private recorderError: Error | null = null;
+  private mimeConfig: RecordingMimeConfig = {
+    mimeType: WEBM_OPUS_MIME,
+    extension: "webm",
+  };
 
   constructor(private readonly options: LiveAudioRecorderOptions) {}
 
@@ -78,11 +156,37 @@ export class LiveAudioRecorder {
       throw new Error("实时录音已经开始");
     }
     assertLiveRecordingSupported(this.options.Recorder);
-    const recorder = new this.options.Recorder(stream, {
-      mimeType: WEBM_OPUS_MIME,
-      audioBitsPerSecond: 96_000,
-    });
+    this.mimeConfig = resolveSupportedRecordingMime(this.options.Recorder);
+    let recorder: MediaRecorder;
+    if (this.mimeConfig.mimeType) {
+      try {
+        recorder = new this.options.Recorder(stream, {
+          mimeType: this.mimeConfig.mimeType,
+          audioBitsPerSecond: 96_000,
+        });
+      } catch {
+        // Some WebKit builds advertise a MIME type they refuse to construct
+        // with. Retry with the recorder default before failing the session.
+        this.mimeConfig = { mimeType: "", extension: "webm" };
+        recorder = new this.options.Recorder(stream, {
+          audioBitsPerSecond: 96_000,
+        });
+      }
+    } else {
+      recorder = new this.options.Recorder(stream, {
+        audioBitsPerSecond: 96_000,
+      });
+    }
     this.recorder = recorder;
+    if (!this.mimeConfig.mimeType) {
+      const actualType = typeof recorder.mimeType === "string"
+        ? recorder.mimeType
+        : "";
+      this.mimeConfig = {
+        mimeType: actualType,
+        extension: recordingExtensionForMime(actualType),
+      };
+    }
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
         this.chunks.push(event.data);
@@ -142,7 +246,12 @@ export class LiveAudioRecorder {
     if (this.recorderError) {
       throw this.recorderError;
     }
-    const blob = new Blob(this.chunks, { type: WEBM_OPUS_MIME });
+    const blobType = this.mimeConfig.mimeType
+      || this.recorder?.mimeType
+      || WEBM_OPUS_MIME;
+    const blob = new Blob(this.chunks, {
+      type: blobType,
+    });
     if (blob.size === 0) {
       throw new Error("实时录音没有产生音频数据");
     }
@@ -151,6 +260,7 @@ export class LiveAudioRecorder {
       this.options.folder,
       this.options.now?.() ?? new Date(),
       (candidate) => this.options.adapter.exists(candidate),
+      this.mimeConfig.extension,
     );
     await this.options.adapter.writeBinary(path, await blob.arrayBuffer());
     return path;

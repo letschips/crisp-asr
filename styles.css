@@ -82,6 +82,55 @@
   box-shadow: 0 8px 22px color-mix(in srgb, var(--crisp-asr-accent) 12%, transparent);
 }
 
+.crisp-asr-mark svg,
+.crisp-asr-title-icon-svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+  color: var(--crisp-asr-accent);
+}
+
+.crisp-asr-mark svg rect,
+.crisp-asr-title-icon-svg rect,
+.svg-icon.crisp-asr rect {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: crisp-asr-bars-scale-middle 0.8s infinite ease-in-out;
+}
+
+.crisp-asr-mark svg rect:nth-child(3),
+.crisp-asr-title-icon-svg rect:nth-child(3),
+.svg-icon.crisp-asr rect:nth-child(3) {
+  animation-delay: 0s;
+}
+
+.crisp-asr-mark svg rect:nth-child(2),
+.crisp-asr-mark svg rect:nth-child(4),
+.crisp-asr-title-icon-svg rect:nth-child(2),
+.crisp-asr-title-icon-svg rect:nth-child(4),
+.svg-icon.crisp-asr rect:nth-child(2),
+.svg-icon.crisp-asr rect:nth-child(4) {
+  animation-delay: 0.16s;
+}
+
+.crisp-asr-mark svg rect:nth-child(1),
+.crisp-asr-mark svg rect:nth-child(5),
+.crisp-asr-title-icon-svg rect:nth-child(1),
+.crisp-asr-title-icon-svg rect:nth-child(5),
+.svg-icon.crisp-asr rect:nth-child(1),
+.svg-icon.crisp-asr rect:nth-child(5) {
+  animation-delay: 0.32s;
+}
+
+@keyframes crisp-asr-bars-scale-middle {
+  0%, 100% {
+    transform: scaleY(0.45);
+  }
+  50% {
+    transform: scaleY(1.0);
+  }
+}
+
 .crisp-asr-mark i {
   width: 2px;
   height: 7px;
@@ -1343,4 +1392,14 @@ body .modal.crisp-asr-smart-modal {
   .crisp-asr-smart-modal .crisp-asr-smart-preview section { min-height: 220px; }
   .crisp-asr-smart-modal .crisp-asr-smart-preview section > div { padding: 16px; }
   .crisp-asr-smart-modal .crisp-asr-smart-modal__actions button { padding-inline: 12px; }
+}
+
+.is-mobile .crisp-asr-button,
+.is-mobile .crisp-asr-live-strip__stop {
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+.is-mobile .crisp-asr-view select.dropdown {
+  min-height: 40px;
 }

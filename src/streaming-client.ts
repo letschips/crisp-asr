@@ -1,3 +1,18 @@
+import { safeRandomUUID } from "./platform-crypto";
+import {
+  type IWebSocket,
+  WS_OPEN,
+  WS_CONNECTING,
+  createPlatformWebSocket,
+  rawDataToBytes,
+} from "./platform-websocket";
+import {
+  buildAudioRequest,
+  buildFullClientRequest,
+  parseServerFrame,
+} from "./doubao-protocol";
+import { recognitionRequestFields } from "./recognition-context";
+
 export interface QueuedAudioPacket {
   audio: Uint8Array;
   sequence: number;
@@ -64,18 +79,8 @@ const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_DELAYS = [1_000, 2_000, 4_000];
 const MAX_RECONNECT_AUDIO_PACKETS = 600;
 
-function rawDataToBytes(data: RawData): Uint8Array {
-  if (Array.isArray(data)) {
-    return new Uint8Array(Buffer.concat(data));
-  }
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data);
-  }
-  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-}
-
 export class DoubaoStreamingClient {
-  private socket: WebSocket | null = null;
+  private socket: IWebSocket | null = null;
   private queue = new PendingAudioQueue();
   private finishPromise: Promise<void> | null = null;
   private resolveFinish: (() => void) | null = null;
@@ -92,11 +97,11 @@ export class DoubaoStreamingClient {
     if (this.socket) {
       throw new Error("实时转写连接已经存在");
     }
-    const socket = new WebSocket(STREAM_URL, {
+    const socket = createPlatformWebSocket(STREAM_URL, {
       headers: {
         "X-Api-Key": this.options.apiKey,
         "X-Api-Resource-Id": this.options.resourceId,
-        "X-Api-Connect-Id": randomUUID(),
+        "X-Api-Connect-Id": safeRandomUUID(),
         "X-Api-Sequence": "-1",
       },
     });
@@ -215,7 +220,7 @@ export class DoubaoStreamingClient {
       this.bufferReconnectAudio(audio);
       return;
     }
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+    if (!this.socket || this.socket.readyState !== WS_OPEN) {
       return;
     }
     const packet = this.queue.push(audio);
@@ -256,8 +261,8 @@ export class DoubaoStreamingClient {
       this.resolveFinish = null;
       this.finishTimer = null;
       await this.connect();
-      const reconnectedSocket = this.socket as WebSocket | null;
-      if (!reconnectedSocket || reconnectedSocket.readyState !== WebSocket.OPEN) {
+      const reconnectedSocket = this.socket as IWebSocket | null;
+      if (!reconnectedSocket || reconnectedSocket.readyState !== WS_OPEN) {
         throw new Error("实时转写重连未能保持连接");
       }
       this.reconnecting = false;
@@ -285,7 +290,7 @@ export class DoubaoStreamingClient {
       return this.finishPromise;
     }
     const socket = this.socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== WS_OPEN) {
       return Promise.resolve();
     }
     const packet = this.queue.finish();
@@ -337,8 +342,8 @@ export class DoubaoStreamingClient {
     if (
       socket
       && (
-        socket.readyState === WebSocket.OPEN
-        || socket.readyState === WebSocket.CONNECTING
+        socket.readyState === WS_OPEN
+        || socket.readyState === WS_CONNECTING
       )
     ) {
       socket.close();
@@ -348,11 +353,3 @@ export class DoubaoStreamingClient {
     this.resolveFinish = null;
   }
 }
-import { randomUUID } from "node:crypto";
-import WebSocket, { type RawData } from "ws";
-import {
-  buildAudioRequest,
-  buildFullClientRequest,
-  parseServerFrame,
-} from "./doubao-protocol";
-import { recognitionRequestFields } from "./recognition-context";

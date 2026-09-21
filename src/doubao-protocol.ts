@@ -1,4 +1,4 @@
-import { gunzipSync, gzipSync } from "node:zlib";
+import { gzip, ungzip } from "pako";
 
 export type ParsedServerFrame =
   | { type: "result"; sequence: number | null; payload: unknown }
@@ -27,7 +27,7 @@ function writeInt32(
 }
 
 export function buildFullClientRequest(payload: unknown): Uint8Array {
-  const compressed = gzipSync(JSON.stringify(payload));
+  const compressed = gzip(JSON.stringify(payload));
   const frame = new Uint8Array(8 + compressed.length);
   frame.set([
     VERSION_AND_HEADER_SIZE,
@@ -45,7 +45,7 @@ export function buildAudioRequest(
   sequence: number,
   isFinal: boolean,
 ): Uint8Array {
-  const compressed = gzipSync(audio);
+  const compressed = gzip(audio);
   const frame = new Uint8Array(12 + compressed.length);
   frame.set([
     VERSION_AND_HEADER_SIZE,
@@ -110,7 +110,7 @@ export function parseServerFrame(frame: Uint8Array): ParsedServerFrame {
   }
   let payload = frame.slice(offset, offset + payloadLength);
   if (compression === 0x01) {
-    payload = gunzipSync(payload);
+    payload = ungzip(payload);
   }
   if (serialization !== 0x01) {
     throw new Error(`豆包返回了不支持的序列化格式：${serialization}`);

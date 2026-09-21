@@ -1,4 +1,10 @@
-import WebSocket, { type RawData } from "ws";
+import {
+  type IWebSocket,
+  WS_OPEN,
+  WS_CONNECTING,
+  createPlatformWebSocket,
+  rawDataToString,
+} from "./platform-websocket";
 import { AsrServiceError } from "./service-error";
 
 export interface GeminiStreamingClientOptions {
@@ -20,15 +26,8 @@ const RECONNECT_DELAYS = [1_000, 2_000, 4_000];
 const MAX_RECONNECT_AUDIO_PACKETS = 600;
 const MAX_LIVE_AUDIO_CHUNK_BYTES = 3_200;
 
-function rawDataToString(data: RawData): string {
-  if (typeof data === "string") return data;
-  if (Array.isArray(data)) return Buffer.concat(data).toString("utf8");
-  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
-  return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
-}
-
 export class GeminiStreamingClient {
-  private socket: WebSocket | null = null;
+  private socket: IWebSocket | null = null;
   private isSetupComplete = false;
   private setupResolve: (() => void) | null = null;
   private setupReject: ((error: Error) => void) | null = null;
@@ -57,7 +56,7 @@ export class GeminiStreamingClient {
     }
 
     const wsUrl = `${LIVE_WS_BASE}?key=${encodeURIComponent(key)}`;
-    const socket = new WebSocket(wsUrl);
+    const socket = createPlatformWebSocket(wsUrl);
     this.socket = socket;
     this.isSetupComplete = false;
 
@@ -104,7 +103,13 @@ export class GeminiStreamingClient {
       if (wasSetup) {
         this.handleUnexpectedClose();
       } else {
-        const reasonStr = reason ? reason.toString("utf8") : "";
+        const reasonStr = reason
+          ? (typeof reason === "string"
+            ? reason
+            : (typeof Buffer !== "undefined" && Buffer.isBuffer?.(reason)
+              ? reason.toString("utf8")
+              : String(reason)))
+          : "";
         const err = new AsrServiceError(
           `Gemini 实时连接建立失败 (${code}): ${reasonStr || "连接断开"}`,
           false,
@@ -167,7 +172,7 @@ export class GeminiStreamingClient {
     });
   }
 
-  private sendSetup(socket: WebSocket): void {
+  private sendSetup(socket: IWebSocket): void {
     const isSmart = this.options.mode !== "verbatim";
     const customVocabulary = this.options.customVocabulary?.slice(0, 1_000);
 
@@ -282,7 +287,7 @@ export class GeminiStreamingClient {
     // Each 16kHz 16-bit mono PCM sample is 2 bytes -> 32 bytes per ms
     this.elapsedMs += Math.floor(audio.byteLength / 32);
 
-    if (this.reconnecting || !this.isSetupComplete || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+    if (this.reconnecting || !this.isSetupComplete || !this.socket || this.socket.readyState !== WS_OPEN) {
       this.bufferPendingAudio(audio);
       return;
     }
@@ -291,7 +296,7 @@ export class GeminiStreamingClient {
   }
 
   private sendMediaChunk(audio: Uint8Array): void {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+    if (!this.socket || this.socket.readyState !== WS_OPEN) {
       return;
     }
     for (let offset = 0; offset < audio.byteLength; offset += MAX_LIVE_AUDIO_CHUNK_BYTES) {
@@ -368,8 +373,8 @@ export class GeminiStreamingClient {
       this.resolveFinish = null;
       this.finishTimer = null;
       await this.connect();
-      const reconnectedSocket = this.socket as WebSocket | null;
-      if (!reconnectedSocket || reconnectedSocket.readyState !== WebSocket.OPEN) {
+      const reconnectedSocket = this.socket as IWebSocket | null;
+      if (!reconnectedSocket || reconnectedSocket.readyState !== WS_OPEN) {
         throw new Error("Gemini 实时转写重连未能保持连接");
       }
       this.reconnecting = false;
@@ -394,7 +399,7 @@ export class GeminiStreamingClient {
       return this.finishPromise;
     }
     const socket = this.socket;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== WS_OPEN) {
       return Promise.resolve();
     }
 
@@ -445,7 +450,7 @@ export class GeminiStreamingClient {
     this.completeFinish();
     const socket = this.socket;
     this.socket = null;
-    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    if (socket && (socket.readyState === WS_OPEN || socket.readyState === WS_CONNECTING)) {
       socket.close();
     }
   }

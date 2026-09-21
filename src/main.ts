@@ -1,9 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { safeRandomUUID } from "./platform-crypto";
 import {
   MarkdownView,
   Notice,
+  Platform,
   Plugin,
   TFile,
+  addIcon,
   normalizePath,
   requestUrl,
   type Editor,
@@ -11,6 +13,7 @@ import {
   type ObsidianProtocolData,
   type TAbstractFile,
 } from "obsidian";
+import { CRISP_ASR_ICON_ID, ICON_BARS_SCALE_MIDDLE_SVG } from "./icon";
 import {
   providerDisplayName,
   requestAiText,
@@ -80,6 +83,7 @@ import {
   type PersistedFileJob,
 } from "./settings";
 import { DoubaoStreamingClient } from "./streaming-client";
+import { DoubaoMobileRecorderClient } from "./doubao-mobile-client";
 import { GeminiStreamingClient } from "./gemini-streaming-client";
 import { SmartProcessingModal } from "./smart-modal";
 import { runCreationWorkflow } from "./creation-workflow";
@@ -108,6 +112,18 @@ import { SpeakerRenameModal } from "./speaker-rename-modal";
 
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 
+export function isMobileEnvironment(): boolean {
+  try {
+    if (typeof Platform !== "undefined" && typeof Platform.isMobile === "boolean") {
+      return Platform.isMobile;
+    }
+  } catch {}
+  if (typeof window !== "undefined" && Boolean((window as any).app?.isMobile)) {
+    return true;
+  }
+  return typeof process === "undefined" || !process.versions?.node;
+}
+
 type UiMode =
   | "idle"
   | "connecting"
@@ -135,7 +151,7 @@ export interface CrispAsrUiState {
 }
 
 interface LiveSession {
-  client: DoubaoStreamingClient | GeminiStreamingClient;
+  client: DoubaoStreamingClient | GeminiStreamingClient | DoubaoMobileRecorderClient;
   capture: LivePcmCapture;
   recorder?: LiveAudioRecorder;
   accumulator: TranscriptAccumulator;
@@ -295,7 +311,7 @@ export default class CrispAsrPlugin extends Plugin {
         this.settings.fileJobs = jobs;
         await this.persistSettings();
       },
-      createId: () => randomUUID(),
+      createId: () => safeRandomUUID(),
       onChange: (jobs) => this.handleQueueChange(jobs),
     });
     this.liveStrip = new CrispAsrLiveStrip(
@@ -305,11 +321,16 @@ export default class CrispAsrPlugin extends Plugin {
         onStop: () => void this.stopLiveTranscription(),
       },
     );
+    try {
+      if (typeof addIcon === "function") {
+        addIcon(CRISP_ASR_ICON_ID, ICON_BARS_SCALE_MIDDLE_SVG);
+      }
+    } catch {}
     this.registerView(
       CRISP_ASR_VIEW_TYPE,
       (leaf) => new CrispAsrView(leaf, this),
     );
-    this.addRibbonIcon("audio-lines", "打开 Crisp ASR", () => {
+    this.addRibbonIcon(CRISP_ASR_ICON_ID, "打开 Crisp ASR", () => {
       void this.openView();
     });
     this.addCommand({
@@ -424,7 +445,7 @@ export default class CrispAsrPlugin extends Plugin {
         }
         menu.addItem((item) => item
           .setTitle("使用 Crisp ASR 转写")
-          .setIcon("audio-lines")
+          .setIcon(CRISP_ASR_ICON_ID)
           .onClick(() => {
             const target = this.app.workspace.getActiveFile();
             void this.transcribeFile(
@@ -1090,7 +1111,8 @@ export default class CrispAsrPlugin extends Plugin {
     let sessionLogId: string | undefined;
     let startupError: Error | null = null;
     let inputEndedDuringStartup = false;
-    let client: DoubaoStreamingClient | GeminiStreamingClient;
+    const isMobileDoubao = this.settings.sttEngine !== "gemini" && isMobileEnvironment();
+    let client: DoubaoStreamingClient | GeminiStreamingClient | DoubaoMobileRecorderClient;
     if (this.settings.sttEngine === "gemini") {
       const customVocab = this.getCustomVocabularyList();
       client = new GeminiStreamingClient({
@@ -1128,6 +1150,35 @@ export default class CrispAsrPlugin extends Plugin {
         onReconnected: () => {
           this.uiState.status = "正在听写";
           this.emit();
+        },
+      });
+    } else if (isMobileDoubao) {
+      client = new DoubaoMobileRecorderClient({
+        apiKey,
+        recognition,
+        onPayload: (payload) => {
+          const result = extractTranscriptResult(payload);
+          const update = accumulator.consume(result);
+          this.uiState.preview = update.preview;
+          this.uiState.finalized = accumulator.utterances();
+          const activeSession = this.liveSession;
+          if (update.added.length > 0 && activeSession?.accumulator === accumulator) {
+            this.scheduleLiveDraftCheckpoint(activeSession);
+          }
+          this.emit();
+        },
+        onError: (error) => {
+          if (this.liveSession) {
+            void this.stopLiveTranscription(error);
+          } else {
+            startupError = error;
+          }
+        },
+        onLogId: (logId) => {
+          sessionLogId = logId;
+          if (this.liveSession) {
+            this.liveSession.logId = logId;
+          }
         },
       });
     } else {
@@ -1255,7 +1306,7 @@ export default class CrispAsrPlugin extends Plugin {
         target,
         startedAt,
         startedAtMs: Date.now(),
-        draftId: randomUUID(),
+        draftId: safeRandomUUID(),
         markers: [],
         provider: this.settings.sttEngine === "gemini" ? "Gemini" : "Doubao",
         ...(sessionLogId ? { logId: sessionLogId } : {}),
@@ -1275,7 +1326,7 @@ export default class CrispAsrPlugin extends Plugin {
       this.draftPersistenceWarned = false;
       await this.persistLiveDraft();
       this.uiState.mode = "listening";
-      this.uiState.status = "正在听写";
+      this.uiState.status = isMobileDoubao ? "正在录音…" : "正在听写";
       this.elapsedTimer = window.setInterval(() => this.emit(), 1_000);
       this.emit();
       if (inputEndedDuringStartup) {
@@ -1331,7 +1382,8 @@ export default class CrispAsrPlugin extends Plugin {
     reason?: Error,
   ): Promise<void> {
     this.uiState.mode = "finishing";
-    this.uiState.status = "正在收尾";
+    const isMobileDoubao = session.provider === "Doubao" && isMobileEnvironment();
+    this.uiState.status = isMobileDoubao ? "正在极速转写…" : "正在收尾";
     this.emit();
     if (this.elapsedTimer !== null) {
       window.clearInterval(this.elapsedTimer);
@@ -1340,6 +1392,7 @@ export default class CrispAsrPlugin extends Plugin {
     try {
       await this.flushLiveDraft(session);
       const result = await finishLiveResources(session);
+      await this.flushLiveDraft(session);
       const text = session.accumulator.finalText().trim();
       if (text.length > 0) {
         const output = await this.writeLiveTranscript(
@@ -1351,7 +1404,7 @@ export default class CrispAsrPlugin extends Plugin {
         new Notice("Crisp ASR：实时转写已写入笔记");
       } else if (result.audioPath) {
         new Notice(`Crisp ASR：录音已保存到 ${result.audioPath}`);
-      } else {
+      } else if (!result.finishError) {
         new Notice("Crisp ASR：这次没有识别到文字");
       }
       if (result.recordingError) {
@@ -1407,7 +1460,7 @@ export default class CrispAsrPlugin extends Plugin {
     const session = this.liveSession;
     if (!session || this.uiState.mode !== "listening") return;
     const marker: LiveMarker = {
-      id: randomUUID(),
+      id: safeRandomUUID(),
       type,
       utteranceIndex: session.accumulator.utterances().length,
       atMs: Date.now() - session.startedAtMs,

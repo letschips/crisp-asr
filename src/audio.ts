@@ -185,3 +185,39 @@ export async function decodeAudioToPcmWav(
     await context.close().catch(() => undefined);
   }
 }
+
+export function pcm16PacketsToWav(
+  packets: Uint8Array[],
+  sampleRate = 16_000,
+): ArrayBuffer {
+  const totalBytes = packets.reduce((sum, p) => sum + p.byteLength, 0);
+  const buffer = new ArrayBuffer(44 + totalBytes);
+  const view = new DataView(buffer);
+  const writeText = (offset: number, value: string): void => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+
+  writeText(0, "RIFF");
+  view.setUint32(4, 36 + totalBytes, true);
+  writeText(8, "WAVE");
+  writeText(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeText(36, "data");
+  view.setUint32(40, totalBytes, true);
+
+  const uint8 = new Uint8Array(buffer);
+  let offset = 44;
+  for (const packet of packets) {
+    uint8.set(packet, offset);
+    offset += packet.byteLength;
+  }
+  return buffer;
+}

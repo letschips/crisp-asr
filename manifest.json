@@ -1,10 +1,10 @@
 {
   "id": "crisp-asr",
   "name": "Crisp ASR",
-  "version": "0.6.3",
-  "minAppVersion": "1.11.4",
+  "version": "0.6.4",
+  "minAppVersion": "1.6.0",
   "description": "Transcribe audio with Doubao or Gemini 3.5 Transcribe, then safely polish or extract notes with your chosen AI.",
   "author": "小红书 letschips",
   "authorUrl": "https://xhslink.cn/m/3MwtKu4822b",
-  "isDesktopOnly": true
+  "isDesktopOnly": false
 }
