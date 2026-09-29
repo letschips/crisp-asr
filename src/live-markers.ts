@@ -41,14 +41,28 @@ export function renderMarkedTranscript(
     byIndex.set(marker.utteranceIndex, list);
   }
   const output: string[] = [];
+  // A callout is closed with a blank line; otherwise Markdown lazy
+  // continuation pulls every following line into it.
+  let afterCallout = false;
   for (let index = 0; index <= lines.length; index += 1) {
     const current = byIndex.get(index) ?? [];
-    if (current.some((marker) => marker.type === "paragraph") && output.length > 0) {
-      output.push("");
+    const line = index < lines.length ? lines[index]?.trim() ?? "" : "";
+    const important = current.some((marker) => marker.type === "important");
+    const question = current.some((marker) => marker.type === "question");
+    const paragraph = current.some((marker) => marker.type === "paragraph");
+    if ((important || question || paragraph || afterCallout) && output.length > 0) {
+      if (output[output.length - 1] !== "") output.push("");
     }
-    if (current.some((marker) => marker.type === "important")) output.push("> [!important] 重点");
-    if (current.some((marker) => marker.type === "question")) output.push("> [!question] 待确认");
-    if (index < lines.length && lines[index]?.trim()) output.push(lines[index]!.trim());
+    afterCallout = false;
+    if (important || question) {
+      output.push(important
+        ? `> [!important] 重点${question ? " · 待确认" : ""}`
+        : "> [!question] 待确认");
+      if (line) output.push(`> ${line}`);
+      afterCallout = true;
+      continue;
+    }
+    if (line) output.push(line);
   }
   return output.join("\n").trim();
 }

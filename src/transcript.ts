@@ -130,6 +130,28 @@ export function formatTimestamp(milliseconds: number): string {
     : `${paddedMinutes}:${paddedSeconds}`;
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+/** Local calendar date, `YYYY-MM-DD`. */
+export function formatLocalDate(date: Date = new Date()): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+/**
+ * Local wall-clock minute (`YYYY-MM-DD HH:mm`) for a stored ISO timestamp.
+ * Stored timestamps stay UTC; headings and titles follow the user's clock,
+ * matching the local-time names of saved live recordings.
+ */
+export function formatLocalMinute(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return iso.slice(0, 16).replace("T", " ");
+  }
+  return `${formatLocalDate(date)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
 function yamlString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
@@ -198,7 +220,7 @@ export function renderLiveTranscriptBlock(input: {
   audioPath?: string;
   body?: string;
 }): string {
-  const date = input.startedAt.slice(0, 16).replace("T", " ");
+  const date = formatLocalMinute(input.startedAt);
   const audio = input.audioPath ? `![[${input.audioPath}]]\n\n` : "";
   const speakerText = renderSpeakerTranscript(input.utterances);
   return `\n\n## 实时转写 · ${date}\n\n${audio}${input.body?.trim() || speakerText || input.text.trim()}\n`;

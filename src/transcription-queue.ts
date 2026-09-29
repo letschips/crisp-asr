@@ -164,9 +164,15 @@ export class TranscriptionQueue {
 
   async remove(id: string): Promise<boolean> {
     const entry = this.storedJobs.find((job) => job.id === id);
+    // A queued job has not been picked up yet (drain marks the job it takes
+    // as "preparing" synchronously), so it can be cancelled safely.
     if (
       !entry
-      || (entry.status !== "completed" && entry.status !== "failed")
+      || (
+        entry.status !== "completed"
+        && entry.status !== "failed"
+        && entry.status !== "queued"
+      )
     ) {
       return false;
     }

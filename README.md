@@ -1,7 +1,37 @@
 # Crisp ASR
 
-Crisp ASR is a desktop-only Obsidian plugin by **letschips** that connects
-directly to Doubao Speech Recognition or Google Gemini 3.5 Transcribe.
+Crisp ASR is an Obsidian plugin by **letschips** for desktop and mobile that
+connects directly to Doubao Speech Recognition or Google Gemini 3.5 Transcribe.
+
+## Version 0.6.5
+
+- 实时听写中标记"重点 / 待确认"后，callout 只包住被标记的那一句，后面的转写不再被一起吞进 callout。
+- 实时转写标题、恢复笔记标题和恢复卡片的时间改用本机时区，不再显示 UTC（此前东八区会差 8 小时）。
+- 恢复出来的"恢复的实时转写"现在可以直接润色、提炼和分阶段创作。
+- 听写过程中识别结果只增量刷新转写区，"结束并写入"和标记按钮不再因为面板重建而偶尔点不动。
+- 连接中可以直接在面板或悬浮条上取消，不必等连接超时。
+- 开启自动转写且监听目录与实时录音目录相同时，实时听写保存的录音不再被重复转写，也不会出现在"扫描未转写录音"里。
+- `data.json` 无法读取时，先把原文件备份为 `data.json.unreadable-<时间戳>` 再使用默认设置，授权码和处理记录可以手动找回。
+- 设置写入后会读回核对。磁盘满、没有权限或同步中断导致没写进去时，会弹出提示，不再显示成保存成功。
+- 排队中、还没开始的转写任务可以在"最近任务"里取消。
+- 开始听写前的准备步骤出错时，面板会显示"启动失败"并可以直接重试，不会一直提示"实时听写已经开始"。
+
+## Version 0.6.4
+
+- 支持移动端（iPhone / iPad / Android）。移动端豆包实时听写先录音，结束后整段极速转写。
+- WebSocket 连接和随机 ID 生成改为同时兼容桌面端与移动端的实现。
+
+## Version 0.6.3
+
+- 新增 macOS 半透明窗口下的毛玻璃视图样式，调整边框、文字对比度和暗色主题下的可读性。
+
+## Version 0.6.2
+
+- 授权联网校验只在服务端明确拒绝时判定无效；授权服务不可用时继续离线使用。
+
+## Version 0.6.1
+
+- 授权校验改用 `license.letschips.xyz`，联网校验 2.5 秒超时后按离线处理。
 
 ## Version 0.6.0
 

@@ -7,6 +7,8 @@ import {
   renderTranscriptNote,
   extractSpeakerNumbers,
   renameSpeakerLabels,
+  formatLocalDate,
+  formatLocalMinute,
 } from "../src/transcript";
 
 describe("TranscriptAccumulator", () => {
@@ -164,5 +166,28 @@ describe("transcript output", () => {
       + "![[Crisp ASR/Audio/live-20260729-180000.webm]]\n\n"
       + "会议结论。\n",
     );
+  });
+});
+
+describe("local time rendering", () => {
+  it("renders headings in the user's time zone, not UTC", () => {
+    const previous = process.env.TZ;
+    process.env.TZ = "Asia/Shanghai";
+    try {
+      expect(formatLocalMinute("2026-07-29T10:00:00.000Z")).toBe("2026-07-29 18:00");
+      expect(formatLocalMinute("2026-07-29T20:30:00.000Z")).toBe("2026-07-30 04:30");
+      expect(formatLocalDate(new Date("2026-07-29T20:30:00.000Z"))).toBe("2026-07-30");
+      expect(renderLiveTranscriptBlock({
+        startedAt: "2026-07-29T10:00:00.000Z",
+        text: "一句。",
+        utterances: [],
+      })).toContain("## 实时转写 · 2026-07-29 18:00");
+    } finally {
+      process.env.TZ = previous;
+    }
+  });
+
+  it("falls back to the raw prefix for an unparseable timestamp", () => {
+    expect(formatLocalMinute("not-a-date-at-all")).toBe("not-a-date-at-all".slice(0, 16));
   });
 });

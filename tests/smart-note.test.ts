@@ -25,6 +25,16 @@ type: Note
 `;
 
 describe("smart transcript note safety", () => {
+  it("recognizes a recovered live transcript", () => {
+    const recovered = `# 恢复转写 2026-07-30 10:00
+
+## 恢复的实时转写 · 2026-07-30 10:00
+
+草稿里的内容。
+`;
+    expect(extractLatestTranscript(recovered)?.text).toBe("草稿里的内容。");
+  });
+
   it("extracts the latest ASR body and excludes audio embeds and timelines", () => {
     expect(extractLatestTranscript(sidecar)).toMatchObject({
       heading: "转写正文",

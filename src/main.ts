@@ -99,6 +99,8 @@ import { TranscriptionQueue } from "./transcription-queue";
 import { UntranscribedAudioModal } from "./untranscribed-modal";
 import {
   extractTranscriptResult,
+  formatLocalDate,
+  formatLocalMinute,
   renderAsrFrontmatter,
   renderLiveTranscriptBlock,
   renderTranscriptNote,
@@ -248,8 +250,9 @@ export default class CrispAsrPlugin extends Plugin {
   private unsubscribeMicrophoneChanges: (() => void) | null = null;
   private microphoneTest: MicrophoneTestSession | null = null;
   private readonly persistence = new SerializedPersistence<CrispAsrSettings>(
-    (settings) => this.saveData(settings),
+    (settings) => this.writeSettings(settings),
   );
+  private lastSaveFailureNoticeAt = 0;
   private draftCheckpointTimer: number | null = null;
   private lastDraftPersistedAt = 0;
   private draftPersistenceWarned = false;
@@ -258,6 +261,12 @@ export default class CrispAsrPlugin extends Plugin {
   async onload(): Promise<void> {
     this.unloaded = false;
     const persistedSettings = await this.loadData();
+    if (persistedSettings === undefined) {
+      // loadData() yields null for a missing file and undefined for one it
+      // could not parse. Keep the damaged bytes before any save overwrites
+      // them with defaults (license code, processed paths, queue).
+      await this.preserveUnreadableSettings();
+    }
     const legacy = persistedSettings
       && typeof persistedSettings === "object"
       && !Array.isArray(persistedSettings)
@@ -506,6 +515,28 @@ export default class CrispAsrPlugin extends Plugin {
     this.smartModal = null;
   }
 
+  private async preserveUnreadableSettings(): Promise<void> {
+    const dir = this.manifest?.dir;
+    if (!dir) {
+      return;
+    }
+    const adapter = this.app.vault.adapter;
+    const path = normalizePath(`${dir}/data.json`);
+    try {
+      if (!(await adapter.exists(path))) {
+        return;
+      }
+      const backup = normalizePath(`${dir}/data.json.unreadable-${Date.now()}`);
+      await adapter.copy(path, backup);
+      new Notice(
+        `Crisp ASR：设置文件无法读取，已备份为 ${backup}，当前使用默认设置`,
+        12_000,
+      );
+    } catch (error) {
+      console.error("Crisp ASR: failed to back up unreadable settings", error);
+    }
+  }
+
   async ensureLicenseActivated(): Promise<boolean> {
     if (!this.settings.licenseCode) {
       new Notice("🔒 Crisp ASR 未激活，请先在设置中输入授权码激活后使用。");
@@ -533,8 +564,55 @@ export default class CrispAsrPlugin extends Plugin {
     this.emit();
   }
 
-  private persistSettings(): Promise<void> {
-    return this.persistence.enqueue(this.settings);
+  /**
+   * Never rejects: returns false when the settings could not be written.
+   * `quiet` lets a caller show its own, more specific message.
+   */
+  private async persistSettings(options: { quiet?: boolean } = {}): Promise<boolean> {
+    try {
+      await this.persistence.enqueue(this.settings);
+      return true;
+    } catch (error) {
+      console.error("Crisp ASR: failed to save settings", error);
+      const now = Date.now();
+      if (!options.quiet && now - this.lastSaveFailureNoticeAt > 30_000) {
+        this.lastSaveFailureNoticeAt = now;
+        const message = error instanceof Error ? error.message : String(error);
+        new Notice(`Crisp ASR 设置保存失败：${message}`, 10_000);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Obsidian's saveData() swallows write errors, so read the file back and
+   * compare; otherwise a failed write (disk full, permissions, iCloud) looks
+   * exactly like success.
+   */
+  private async writeSettings(settings: CrispAsrSettings): Promise<void> {
+    await this.saveData(settings);
+    const dir = this.manifest?.dir;
+    const adapter = this.app.vault?.adapter;
+    if (!dir || typeof adapter?.read !== "function") {
+      return;
+    }
+    const path = normalizePath(`${dir}/data.json`);
+    let stored: string;
+    try {
+      stored = await adapter.read(path);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`写入后无法读回设置文件：${message}`);
+    }
+    let matches = false;
+    try {
+      matches = JSON.stringify(JSON.parse(stored)) === JSON.stringify(settings);
+    } catch {
+      matches = false;
+    }
+    if (!matches) {
+      throw new Error("设置文件没有完整写入，请检查磁盘空间、权限或同步状态");
+    }
   }
 
   formatElapsed(): string {
@@ -640,7 +718,7 @@ export default class CrispAsrPlugin extends Plugin {
     const modeLabel = this.smartModeLabel(mode);
     const metadata: ProcessingMetadata = {
       title: target.file.basename,
-      date: new Date().toISOString().slice(0, 10),
+      date: formatLocalDate(),
     };
     this.smartModal?.close();
     const modal = new SmartProcessingModal(this.app, {
@@ -1103,6 +1181,33 @@ export default class CrispAsrPlugin extends Plugin {
     this.liveStarting = true;
     const startAbort = new AbortController();
     this.liveStartAbort = startAbort;
+    try {
+      await this.runLiveStart(startAbort);
+    } catch (error) {
+      // Setup before the connection (note context, clients, recorder) can
+      // throw too; without this the plugin stayed in "starting" for good.
+      if (!startAbort.signal.aborted && !this.unloaded) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.uiState.mode = "error";
+        this.uiState.status = "启动失败";
+        this.uiState.inputLevel = 0;
+        this.emit();
+        new Notice(`Crisp ASR 无法开始听写：${message}`, 8_000);
+      }
+    } finally {
+      if (this.liveStartAbort === startAbort) {
+        this.liveStartAbort = null;
+      }
+      this.liveStarting = false;
+    }
+  }
+
+  private async runLiveStart(startAbort: AbortController): Promise<void> {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
+      this.showMissingKey();
+      return;
+    }
     const accumulator = new TranscriptAccumulator();
     const target = this.app.workspace.getActiveViewOfType(MarkdownView)?.file
       ?? null;
@@ -1347,11 +1452,6 @@ export default class CrispAsrPlugin extends Plugin {
       this.uiState.inputLevel = 0;
       this.emit();
       new Notice(`Crisp ASR 无法开始听写：${message}`, 8_000);
-    } finally {
-      if (this.liveStartAbort === startAbort) {
-        this.liveStartAbort = null;
-      }
-      this.liveStarting = false;
     }
   }
 
@@ -1392,6 +1492,11 @@ export default class CrispAsrPlugin extends Plugin {
     try {
       await this.flushLiveDraft(session);
       const result = await finishLiveResources(session);
+      if (result.audioPath) {
+        // The recording belongs to this transcript; keep it out of the
+        // untranscribed scan and auto-transcription.
+        this.rememberProcessed(result.audioPath);
+      }
       await this.flushLiveDraft(session);
       const text = session.accumulator.finalText().trim();
       if (text.length > 0) {
@@ -1499,16 +1604,17 @@ export default class CrispAsrPlugin extends Plugin {
 
   private async persistLiveDraft(): Promise<void> {
     this.lastDraftPersistedAt = Date.now();
-    try {
-      await this.persistSettings();
+    if (await this.persistSettings({ quiet: true })) {
       this.draftPersistenceWarned = false;
-    } catch (error) {
-      this.lastDraftPersistedAt = 0;
-      if (!this.draftPersistenceWarned) {
-        this.draftPersistenceWarned = true;
-        const message = error instanceof Error ? error.message : String(error);
-        new Notice(`Crisp ASR 恢复草稿保存失败：${message}`, 8_000);
-      }
+      return;
+    }
+    this.lastDraftPersistedAt = 0;
+    if (!this.draftPersistenceWarned) {
+      this.draftPersistenceWarned = true;
+      new Notice(
+        "Crisp ASR 恢复草稿保存失败：听写仍在继续，但意外退出时可能无法恢复",
+        8_000,
+      );
     }
   }
 
@@ -1538,7 +1644,7 @@ export default class CrispAsrPlugin extends Plugin {
         output = target;
       } else {
         await this.ensureFolder(this.settings.outputFolder);
-        const title = `恢复转写 ${draft.startedAt.slice(0, 16).replace("T", " ")}`;
+        const title = `恢复转写 ${formatLocalMinute(draft.startedAt)}`;
         const preferred = normalizePath(
           `${this.settings.outputFolder}/${title.replace(/:/g, "-")}.md`,
         );
@@ -1796,18 +1902,31 @@ export default class CrispAsrPlugin extends Plugin {
         this.settings.autoTranscribeFolder,
       )
       || this.settings.processedAudioPaths.includes(file.path)
+      || this.isOwnLiveRecording(file.path)
     ) {
       return;
     }
     const target = this.app.workspace.getActiveFile();
     const timer = window.setTimeout(() => {
       this.autoTimers.delete(timer);
+      if (this.settings.processedAudioPaths.includes(file.path)) {
+        return;
+      }
       void this.transcribeFile(
         file,
         target?.extension === "md" ? target : undefined,
       );
     }, 800);
     this.autoTimers.add(timer);
+  }
+
+  /** A recording Crisp ASR itself is saving for the running live session. */
+  private isOwnLiveRecording(path: string): boolean {
+    if (!this.liveSession || !this.settings.saveLiveAudio) {
+      return false;
+    }
+    const folder = normalizePath(this.settings.liveAudioFolder);
+    return path.startsWith(`${folder}/`);
   }
 
   private async writeFileTranscript(
@@ -1871,7 +1990,7 @@ export default class CrispAsrPlugin extends Plugin {
       }
     }
     await this.ensureFolder(this.settings.outputFolder);
-    const title = `实时转写 ${session.startedAt.slice(0, 16).replace("T", " ")}`;
+    const title = `实时转写 ${formatLocalMinute(session.startedAt)}`;
     const preferred = normalizePath(
       `${this.settings.outputFolder}/${title.replace(/:/g, "-")}.md`,
     );

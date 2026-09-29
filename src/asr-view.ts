@@ -8,6 +8,7 @@ import type { PersistedFileJob } from "./settings";
 import type { PersistedLiveDraft } from "./live-draft";
 import { DICTATION_PROFILES } from "./dictation-profile";
 import { CRISP_ASR_ICON_ID, ICON_BARS_SCALE_MIDDLE_SVG } from "./icon";
+import { formatLocalMinute } from "./transcript";
 
 export const CRISP_ASR_VIEW_TYPE = "crisp-asr";
 
@@ -51,6 +52,10 @@ function formatJobMessage(job: PersistedFileJob): string {
   }
 }
 
+function transcriptCountLabel(count: number): string {
+  return count > 0 ? `${count} 个确定分句` : "等待声音";
+}
+
 function basename(path: string): string {
   return path.split("/").pop() ?? path;
 }
@@ -84,6 +89,8 @@ export class CrispAsrView extends ItemView {
   private levelMeter: HTMLElement | null = null;
   private levelFill: HTMLElement | null = null;
   private liveHeading: HTMLElement | null = null;
+  private transcriptBody: HTMLElement | null = null;
+  private transcriptCount: HTMLElement | null = null;
   private showAllJobs = false;
 
   constructor(
@@ -119,6 +126,8 @@ export class CrispAsrView extends ItemView {
     this.levelMeter = null;
     this.levelFill = null;
     this.liveHeading = null;
+    this.transcriptBody = null;
+    this.transcriptCount = null;
   }
 
   private captureSnapshot(): ViewSnapshot {
@@ -149,11 +158,16 @@ export class CrispAsrView extends ItemView {
   }
 
   private snapshotsMatch(left: ViewSnapshot, right: ViewSnapshot): boolean {
+    return left.preview === right.preview
+      && left.finalized === right.finalized
+      && this.controlsMatch(left, right);
+  }
+
+  /** Everything except the live transcript text. */
+  private controlsMatch(left: ViewSnapshot, right: ViewSnapshot): boolean {
     return left.mode === right.mode
       && left.status === right.status
-      && left.preview === right.preview
       && left.targetPath === right.targetPath
-      && left.finalized === right.finalized
       && left.jobs === right.jobs
       && left.microphones === right.microphones
       && left.microphoneWarning === right.microphoneWarning
@@ -177,8 +191,70 @@ export class CrispAsrView extends ItemView {
       this.snapshot = next;
       return;
     }
+    // Recognition updates arrive several times per second while dictating.
+    // Rebuilding the whole panel for each one replaces the buttons between
+    // mousedown and mouseup, so clicks on 结束并写入 / 重点 get lost.
+    if (
+      this.snapshot
+      && this.controlsMatch(this.snapshot, next)
+      && this.patchTranscript()
+    ) {
+      this.updateLevelMeter();
+      this.updateElapsed(next.elapsed);
+      this.snapshot = next;
+      return;
+    }
     this.render(next);
     this.snapshot = next;
+  }
+
+  private patchTranscript(): boolean {
+    const body = this.transcriptBody;
+    const count = this.transcriptCount;
+    const state = this.plugin.uiState;
+    if (
+      !body
+      || !count
+      || !this.contentEl.contains(body)
+      || (state.finalized.length === 0 && !state.preview)
+      || body.querySelector(".crisp-asr-empty")
+    ) {
+      return false;
+    }
+    const previousScrollTop = body.scrollTop;
+    const followedLatest = body.scrollHeight
+      - previousScrollTop
+      - body.clientHeight <= 24;
+    const desired = state.finalized.map((utterance) => ({
+      text: utterance.text,
+      className: "crisp-asr-utterance",
+    }));
+    if (state.preview) {
+      desired.push({
+        text: state.preview,
+        className: "crisp-asr-utterance is-preview",
+      });
+    }
+    const existing = Array.from(body.children) as HTMLElement[];
+    desired.forEach((item, index) => {
+      let paragraph = existing[index];
+      if (!paragraph) {
+        paragraph = body.ownerDocument.createElement("p");
+        body.append(paragraph);
+      }
+      if (paragraph.className !== item.className) {
+        paragraph.className = item.className;
+      }
+      if (paragraph.textContent !== item.text) {
+        paragraph.textContent = item.text;
+      }
+    });
+    for (const extra of existing.slice(desired.length)) {
+      extra.remove();
+    }
+    count.textContent = transcriptCountLabel(state.finalized.length);
+    body.scrollTop = followedLatest ? body.scrollHeight : previousScrollTop;
+    return true;
   }
 
   private updateLevelMeter(): void {
@@ -213,6 +289,8 @@ export class CrispAsrView extends ItemView {
     this.levelMeter = null;
     this.levelFill = null;
     this.liveHeading = null;
+    this.transcriptBody = null;
+    this.transcriptCount = null;
 
     const shell = document.createElement("div");
     shell.className = "crisp-asr-shell";
@@ -246,9 +324,9 @@ export class CrispAsrView extends ItemView {
       const recoveryHeading = document.createElement("strong");
       recoveryHeading.textContent = "发现未写入的实时转写";
       const recoveryTime = document.createElement("span");
-      recoveryTime.textContent = state.recoveryDraft.startedAt
-        .slice(0, 16)
-        .replace("T", " ");
+      recoveryTime.textContent = formatLocalMinute(
+        state.recoveryDraft.startedAt,
+      );
       recoveryTitle.append(recoveryHeading, recoveryTime);
       const recoveryDescription = document.createElement("p");
       recoveryDescription.className = "crisp-asr-recovery__description";
@@ -420,13 +498,14 @@ export class CrispAsrView extends ItemView {
       () => void this.plugin.startLiveTranscription(),
       state.mode !== "idle" && state.mode !== "error",
     );
+    const connecting = state.mode === "connecting";
     createButton(
       actionRow,
-      "结束并写入",
-      "square",
+      connecting ? "取消" : "结束并写入",
+      connecting ? "x" : "square",
       "is-secondary",
       () => void this.plugin.stopLiveTranscription(),
-      state.mode !== "listening",
+      state.mode !== "listening" && !connecting,
     );
     controls.append(controlTitle, sourceControls, actionRow);
 
@@ -446,12 +525,12 @@ export class CrispAsrView extends ItemView {
     const transcriptTitle = document.createElement("strong");
     transcriptTitle.textContent = "转写流";
     const count = document.createElement("span");
-    count.textContent = state.finalized.length > 0
-      ? `${state.finalized.length} 个确定分句`
-      : "等待声音";
+    count.textContent = transcriptCountLabel(state.finalized.length);
+    this.transcriptCount = count;
     transcriptHeading.append(transcriptTitle, count);
     const transcriptBody = document.createElement("div");
     transcriptBody.className = "crisp-asr-transcript__body";
+    this.transcriptBody = transcriptBody;
     if (state.finalized.length === 0 && !state.preview) {
       const empty = document.createElement("div");
       empty.className = "crisp-asr-empty";
@@ -611,10 +690,14 @@ export class CrispAsrView extends ItemView {
         });
         jobActions.append(open);
       }
-      if (job.status === "completed" || job.status === "failed") {
+      if (
+        job.status === "completed"
+        || job.status === "failed"
+        || job.status === "queued"
+      ) {
         const remove = document.createElement("button");
         remove.type = "button";
-        remove.textContent = "移除";
+        remove.textContent = job.status === "queued" ? "取消" : "移除";
         remove.addEventListener("click", () => {
           void this.plugin.removeFileJob(job.id);
         });

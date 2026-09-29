@@ -58,6 +58,27 @@ describe("Crisp live strip", () => {
     expect(stopped).toBe(1);
   });
 
+  it("lets the strip cancel a session that is still connecting", () => {
+    let stops = 0;
+    const strip = new CrispAsrLiveStrip(document, {
+      onOpen: () => undefined,
+      onStop: () => {
+        stops += 1;
+      },
+    });
+    strip.update({ mode: "connecting", elapsed: "00:00", preview: "" });
+    const button = document.querySelector<HTMLButtonElement>(".crisp-asr-live-strip__stop");
+    expect(button?.textContent).toBe("取消");
+    expect(button?.disabled).toBe(false);
+    button?.click();
+    expect(stops).toBe(1);
+
+    strip.update({ mode: "finishing", elapsed: "00:03", preview: "" });
+    expect(button?.textContent).toBe("结束并写入");
+    expect(button?.disabled).toBe(true);
+    strip.destroy();
+  });
+
   it("removes the strip when listening is no longer active", () => {
     const strip = new CrispAsrLiveStrip(document, {
       onOpen: () => undefined,

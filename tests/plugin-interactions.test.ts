@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { TFile } from "obsidian";
 import CrispAsrPlugin from "../src/main";
 import { findUntranscribedAudio } from "../src/main";
 import { collectTranscribedAudioPaths } from "../src/main";
@@ -177,6 +178,146 @@ describe("plugin interaction registration", () => {
     expect(abort.signal.aborted).toBe(true);
     expect(plugin.uiState.mode).toBe("idle");
     expect(plugin.uiState.status).toBe("就绪");
+  });
+});
+
+describe("settings and auto-transcription safety", () => {
+  it("backs up an unreadable data.json before defaults can overwrite it", async () => {
+    const copies: Array<[string, string]> = [];
+    const app = createApp();
+    (app.vault as Record<string, unknown>).adapter = {
+      exists: async (path: string) => path === ".obsidian/plugins/crisp-asr/data.json",
+      copy: async (from: string, to: string) => {
+        copies.push([from, to]);
+      },
+    };
+    const plugin = new CrispAsrPlugin(
+      app as never,
+      { id: "crisp-asr", dir: ".obsidian/plugins/crisp-asr" } as never,
+    );
+    plugin.loadData = async () => undefined;
+
+    await plugin.onload();
+
+    expect(copies).toHaveLength(1);
+    expect(copies[0]?.[0]).toBe(".obsidian/plugins/crisp-asr/data.json");
+    expect(copies[0]?.[1]).toMatch(/^\.obsidian\/plugins\/crisp-asr\/data\.json\.unreadable-\d+$/);
+  });
+
+  it("does not back up anything on a genuine first install", async () => {
+    let copied = false;
+    const app = createApp();
+    (app.vault as Record<string, unknown>).adapter = {
+      exists: async () => false,
+      copy: async () => {
+        copied = true;
+      },
+    };
+    const plugin = new CrispAsrPlugin(
+      app as never,
+      { id: "crisp-asr", dir: ".obsidian/plugins/crisp-asr" } as never,
+    );
+    plugin.loadData = async () => null;
+
+    await plugin.onload();
+
+    expect(copied).toBe(false);
+  });
+
+  it("detects a settings write that did not reach disk", async () => {
+    const files = new Map<string, string>();
+    const app = createApp();
+    (app.vault as Record<string, unknown>).adapter = {
+      exists: async (path: string) => files.has(path),
+      read: async (path: string) => {
+        const value = files.get(path);
+        if (value === undefined) throw new Error("ENOENT");
+        return value;
+      },
+      copy: async () => undefined,
+    };
+    const plugin = new CrispAsrPlugin(
+      app as never,
+      { id: "crisp-asr", dir: "plugins/crisp-asr" } as never,
+    );
+    plugin.loadData = async () => null;
+    await plugin.onload();
+    const internal = plugin as unknown as {
+      persistSettings: (options?: { quiet?: boolean }) => Promise<boolean>;
+    };
+
+    // Obsidian's saveData resolves even when nothing was written.
+    plugin.saveData = async () => undefined;
+    await expect(internal.persistSettings({ quiet: true })).resolves.toBe(false);
+
+    // A truncated write is caught by the read-back.
+    plugin.saveData = async (value: unknown) => {
+      files.set("plugins/crisp-asr/data.json", JSON.stringify(value).slice(0, 20));
+    };
+    await expect(internal.persistSettings({ quiet: true })).resolves.toBe(false);
+
+    plugin.saveData = async (value: unknown) => {
+      files.set("plugins/crisp-asr/data.json", JSON.stringify(value, null, 2));
+    };
+    await expect(internal.persistSettings({ quiet: true })).resolves.toBe(true);
+  });
+
+  it("leaves the starting state when setup fails before connecting", async () => {
+    const app = createApp();
+    app.secretStorage = { getSecret: () => "key" };
+    const plugin = new CrispAsrPlugin(app as never, { id: "crisp-asr" } as never);
+    Object.assign(plugin.settings, {
+      apiKeySecretName: "asr",
+      licenseCode: "x",
+      saveLiveAudio: false,
+    });
+    const internal = plugin as unknown as {
+      liveStarting: boolean;
+      buildRecognition: () => Promise<never>;
+    };
+    plugin.ensureLicenseActivated = async () => true;
+    internal.buildRecognition = async () => {
+      throw new Error("setup exploded");
+    };
+
+    await plugin.startLiveTranscription();
+
+    expect(internal.liveStarting).toBe(false);
+    expect(plugin.uiState.mode).toBe("error");
+    expect(plugin.uiState.status).toBe("启动失败");
+  });
+
+  it("does not auto-transcribe the recording it is saving for a live session", () => {
+    const plugin = new CrispAsrPlugin(
+      createApp() as never,
+      { id: "crisp-asr" } as never,
+    );
+    Object.assign(plugin.settings, {
+      autoTranscribeRecordings: true,
+      autoTranscribeScope: "folder",
+      autoTranscribeFolder: "Audio",
+      saveLiveAudio: true,
+      liveAudioFolder: "Audio",
+    });
+    const internal = plugin as unknown as {
+      liveSession: unknown;
+      autoTimers: Set<number>;
+      handleCreatedFile: (file: unknown) => void;
+    };
+    const file = Object.assign(new TFile(), {
+      path: "Audio/live-20260929-120000.webm",
+      name: "live-20260929-120000.webm",
+      extension: "webm",
+    });
+
+    internal.liveSession = {};
+    internal.handleCreatedFile(file);
+    expect(internal.autoTimers.size).toBe(0);
+
+    internal.liveSession = null;
+    internal.handleCreatedFile(file);
+    expect(internal.autoTimers.size).toBe(1);
+    for (const timer of internal.autoTimers) window.clearTimeout(timer);
   });
 });
 

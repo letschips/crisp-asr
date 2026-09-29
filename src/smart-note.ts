@@ -27,7 +27,7 @@ export function extractLatestTranscript(
   markdown: string,
 ): TranscriptSection | null {
   const headingPattern =
-    /^## (转写正文|音频转写(?:\s*·[^\n]*)?|实时转写(?:\s*·[^\n]*)?)\s*$/gm;
+    /^## (转写正文|音频转写(?:\s*·[^\n]*)?|(?:恢复的)?实时转写(?:\s*·[^\n]*)?)\s*$/gm;
   const matches = [...markdown.matchAll(headingPattern)];
   const match = matches[matches.length - 1];
   if (!match || match.index === undefined) {

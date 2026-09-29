@@ -190,13 +190,14 @@ describe("persistent transcription queue", () => {
     expect(queue.jobs()[0].lastError).toBeUndefined();
   });
 
-  it("removes terminal jobs but preserves active work", async () => {
+  it("removes terminal jobs, cancels queued ones, and preserves running work", async () => {
     const { TranscriptionQueue } = await import(
       "../src/transcription-queue"
     );
     const queue = new TranscriptionQueue([
       job("done", "completed"),
-      job("active", "queued"),
+      job("active", "transcribing"),
+      job("waiting", "queued"),
     ], {
       run: async () => ({}),
       persist: async () => undefined,
@@ -207,6 +208,7 @@ describe("persistent transcription queue", () => {
 
     await expect(queue.remove("active")).resolves.toBe(false);
     await expect(queue.remove("done")).resolves.toBe(true);
+    await expect(queue.remove("waiting")).resolves.toBe(true);
     expect(queue.jobs().map((entry) => entry.id)).toEqual(["active"]);
   });
 

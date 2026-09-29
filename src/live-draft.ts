@@ -1,4 +1,4 @@
-import type { TranscriptUtterance } from "./transcript";
+import { formatLocalMinute, type TranscriptUtterance } from "./transcript";
 import { normalizeLiveMarkers, type LiveMarker } from "./live-markers";
 import { renderMarkedTranscript } from "./live-markers";
 
@@ -81,7 +81,7 @@ export function renderRecoveredTranscript(draft: PersistedLiveDraft): string {
     ...(draft.preview ? [draft.preview] : []),
   ];
   const text = renderMarkedTranscript(lines, draft.markers ?? []);
-  const date = draft.startedAt.slice(0, 16).replace("T", " ");
+  const date = formatLocalMinute(draft.startedAt);
   return `\n\n## 恢复的实时转写 · ${date}\n\n${text}\n`;
 }
 

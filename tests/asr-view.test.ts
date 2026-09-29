@@ -353,6 +353,29 @@ describe("Crisp ASR view controls", () => {
     expect(calls).toEqual(["retry:failed-1", "remove:failed-1"]);
   });
 
+  it("lets the user cancel a queued job but not a running one", async () => {
+    const calls: string[] = [];
+    const instance = plugin({
+      removeFileJob: async (id: string) => {
+        calls.push(`remove:${id}`);
+      },
+    });
+    (instance.uiState as { jobs: unknown[] }).jobs = [
+      { id: "q", sourcePath: "Audio/q.m4a", status: "queued", attempt: 0, createdAt: 1, updatedAt: 3 },
+      { id: "t", sourcePath: "Audio/t.m4a", status: "transcribing", attempt: 1, createdAt: 1, updatedAt: 2 },
+    ];
+    const view = viewFor(instance);
+
+    await view.onOpen();
+    const rows = view.contentEl.querySelectorAll(".crisp-asr-job");
+    expect(Array.from(rows[0]?.querySelectorAll("button") ?? []).map((b) => b.textContent))
+      .toEqual(["取消"]);
+    expect(rows[1]?.querySelectorAll("button")).toHaveLength(0);
+    rows[0]?.querySelector("button")?.click();
+    await Promise.resolve();
+    expect(calls).toEqual(["remove:q"]);
+  });
+
   it("lets the user reach jobs beyond the five-item preview", async () => {
     const instance = plugin();
     (instance.uiState as { jobs: unknown[] }).jobs = Array.from(
@@ -384,6 +407,65 @@ describe("Crisp ASR view controls", () => {
         ".crisp-asr-jobs__toggle",
       )?.textContent,
     ).toBe("收起");
+  });
+
+  it("keeps the stop and marker buttons stable while recognition updates stream in", async () => {
+    let notify: () => void = () => undefined;
+    const stops: string[] = [];
+    const instance = plugin({
+      subscribe: (listener: () => void) => {
+        notify = listener;
+        return () => undefined;
+      },
+      stopLiveTranscription: async () => {
+        stops.push("stop");
+      },
+    });
+    const state = instance.uiState as {
+      mode: string;
+      preview: string;
+      finalized: Array<{ text: string; start_time: number; end_time: number; definite: boolean }>;
+    };
+    state.mode = "listening";
+    state.preview = "正在说";
+    const view = viewFor(instance);
+    await view.onOpen();
+    const findStop = () => Array.from(
+      view.contentEl.querySelectorAll<HTMLButtonElement>(".crisp-asr-button"),
+    ).find((button) => button.textContent?.includes("结束并写入"));
+    const stop = findStop();
+    const marker = view.contentEl.querySelector(".crisp-asr-marker-actions button");
+
+    state.preview = "正在说第二句";
+    notify();
+    state.finalized = [{ text: "第一句", start_time: 0, end_time: 1, definite: true }];
+    state.preview = "";
+    notify();
+
+    expect(findStop()).toBe(stop);
+    expect(view.contentEl.querySelector(".crisp-asr-marker-actions button")).toBe(marker);
+    const paragraphs = Array.from(
+      view.contentEl.querySelectorAll(".crisp-asr-transcript__body p"),
+    ).map((node) => [node.className, node.textContent]);
+    expect(paragraphs).toEqual([["crisp-asr-utterance", "第一句"]]);
+    expect(view.contentEl.querySelector(".crisp-asr-transcript .crisp-asr-card__title span")?.textContent)
+      .toBe("1 个确定分句");
+    stop?.click();
+    await Promise.resolve();
+    expect(stops).toEqual(["stop"]);
+  });
+
+  it("offers cancel while a live session is still connecting", async () => {
+    const instance = plugin();
+    (instance.uiState as { mode: string }).mode = "connecting";
+    const view = viewFor(instance);
+
+    await view.onOpen();
+
+    const cancel = Array.from(
+      view.contentEl.querySelectorAll<HTMLButtonElement>(".crisp-asr-button"),
+    ).find((button) => button.textContent?.includes("取消"));
+    expect(cancel?.disabled).toBe(false);
   });
 
   it("prevents a second stop while the current session is finishing", async () => {

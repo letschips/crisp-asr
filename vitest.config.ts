@@ -13,5 +13,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // Fixtures use UTC timestamps; pin the zone so local-time rendering is
+    // deterministic. Individual tests override TZ to prove local behaviour.
+    env: { TZ: "UTC" },
   },
 });

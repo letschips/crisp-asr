@@ -50,7 +50,9 @@ export class CrispAsrLiveStrip {
     this.timer.textContent = state.elapsed;
     this.preview.textContent = state.preview || "声音会继续写入当前目标笔记";
     if (this.stopButton) {
-      this.stopButton.disabled = state.mode !== "listening";
+      const connecting = state.mode === "connecting";
+      this.stopButton.textContent = connecting ? "取消" : "结束并写入";
+      this.stopButton.disabled = state.mode !== "listening" && !connecting;
     }
   }
 
