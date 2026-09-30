@@ -1,7 +1,24 @@
 # Crisp ASR
 
 Crisp ASR is an Obsidian plugin by **letschips** for desktop and mobile that
-connects directly to Doubao Speech Recognition or Google Gemini 3.5 Transcribe.
+connects directly to Doubao Speech Recognition or Google Gemini 3.5 Transcribe,
+and reads notes aloud with Google Gemini 3.8 TTS.
+
+## Version 0.7.0
+
+新增朗读：用 Gemini 3.8 TTS 把笔记读出来。
+
+- 编辑器右键：选中文字时显示"朗读选中文字"；没有选中时显示"朗读全文"和"从光标处朗读"。
+- 文件列表和标签页右键菜单里有"朗读此笔记"。
+- 右侧面板新增"朗读"卡片：空闲时可以朗读最近打开的笔记；朗读时显示进度，可以暂停、继续或停止。
+- 命令面板新增"朗读选中文本或当前笔记""暂停/继续朗读""停止朗读"，可以绑定快捷键。桌面端状态栏显示进度，点一下暂停或继续。
+- 设置里新增"朗读"分组：模型（默认 Flash-Lite，更快更省；Flash 音质更好）、30 个预置音色、可选的朗读风格和试听。
+- 与 Gemini 转写共用同一个 Gemini API Key，转写引擎选豆包时也可以单独配置。朗读会消耗 Gemini 额度。
+- 朗读前会去掉 frontmatter、代码块、公式块、注释、链接地址和图片嵌入，链接只读显示文字。尖括号内容一律去掉，因为 Gemini 3.8 会把 `<...>` 当成语气标签。
+- 长文按句子分段合成，边播边预取下一段；第一段更短，缩短按下到出声的等待。遇到限流或服务端错误会自动重试一次。
+- 光标在代码块或 frontmatter 里时，"从光标处朗读"从这个块结束后开始。
+
+手机端的朗读还没有做实机测试，锁屏或切到后台后能否继续播放暂未确认。
 
 ## Version 0.6.5
 

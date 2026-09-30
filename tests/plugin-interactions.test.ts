@@ -50,6 +50,9 @@ describe("plugin interaction registration", () => {
     expect(commands).toContain("polish-current-transcript");
     expect(commands).toContain("extract-current-transcript");
     expect(commands).toContain("custom-process-current-transcript");
+    expect(commands).toContain("read-aloud");
+    expect(commands).toContain("read-aloud-toggle-pause");
+    expect(commands).toContain("read-aloud-stop");
     expect(
       (
         plugin as unknown as {

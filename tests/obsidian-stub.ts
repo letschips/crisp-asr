@@ -36,10 +36,13 @@ export class Plugin {
       setText: () => undefined,
       show: () => undefined,
       hide: () => undefined,
+      setAttr: () => undefined,
     };
   }
 
   registerEvent(): void {}
+
+  registerDomEvent(): void {}
 
   registerObsidianProtocolHandler(
     action: string,

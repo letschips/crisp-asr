@@ -6,6 +6,11 @@ import {
   normalizeDictationProfileId,
   type DictationProfileId,
 } from "./dictation-profile";
+import {
+  GEMINI_TTS_MODELS,
+  GEMINI_TTS_VOICES,
+  type GeminiTtsModel,
+} from "./gemini-tts";
 
 export type SttEngine = "doubao" | "gemini";
 export type GeminiMode = "smart" | "verbatim";
@@ -52,6 +57,9 @@ export interface CrispAsrSettings {
   geminiIdentifySpeakers: boolean;
   geminiWordTimestamps: boolean;
   geminiCustomVocabulary: string;
+  ttsModel: GeminiTtsModel;
+  ttsVoice: string;
+  ttsStyle: string;
   aiProvider: AiProvider;
   aiApiKeySecretName: string;
   aiModel: string;
@@ -91,6 +99,9 @@ export const DEFAULT_SETTINGS: CrispAsrSettings = {
   geminiIdentifySpeakers: false,
   geminiWordTimestamps: false,
   geminiCustomVocabulary: "",
+  ttsModel: "gemini-3.8-flash-lite-tts",
+  ttsVoice: "Kore",
+  ttsStyle: "",
   aiProvider: "ark",
   aiApiKeySecretName: "",
   aiModel: "",
@@ -240,6 +251,13 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
     geminiCustomVocabulary: typeof candidate.geminiCustomVocabulary === "string"
       ? candidate.geminiCustomVocabulary.trim()
       : "",
+    ttsModel: GEMINI_TTS_MODELS.some(([id]) => id === candidate.ttsModel)
+      ? candidate.ttsModel as GeminiTtsModel
+      : DEFAULT_SETTINGS.ttsModel,
+    ttsVoice: GEMINI_TTS_VOICES.some(([id]) => id === candidate.ttsVoice)
+      ? candidate.ttsVoice as string
+      : DEFAULT_SETTINGS.ttsVoice,
+    ttsStyle: cleanText(candidate.ttsStyle),
     aiProvider:
       candidate.aiProvider === "openai"
       || candidate.aiProvider === "anthropic"

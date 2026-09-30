@@ -12,6 +12,11 @@ import type { SilenceAction, SilenceDurationSeconds } from "./settings";
 import { verifyLicenseCode } from "./license";
 import shortcutQrCode from "./assets/shortcut-qr.png";
 import { DICTATION_PROFILES, type DictationProfileId } from "./dictation-profile";
+import {
+  GEMINI_TTS_MODELS,
+  GEMINI_TTS_VOICES,
+  type GeminiTtsModel,
+} from "./gemini-tts";
 
 const CRISP_SHORTCUT_URL =
   "https://www.icloud.com/shortcuts/b5c18553917b4f96bb302f88ccb2f0d4";
@@ -499,6 +504,81 @@ export class CrispAsrSettingTab extends PluginSettingTab {
             return;
           }
           await this.plugin.testAiConnection();
+        }));
+
+    // -----------------------------------------------------------------
+    // 朗读（Gemini 3.8 TTS）
+    // -----------------------------------------------------------------
+    const tts = createSettingGroup(
+      containerEl,
+      "朗读",
+      "用 Gemini 3.8 TTS 朗读选中文本或当前笔记，与 Gemini 转写共用 API Key",
+      false,
+    );
+
+    new Setting(tts)
+      .setName("Gemini API Key")
+      .setDesc("与 Gemini 3.5 Transcribe 共用同一个 Secret；使用豆包转写时也可以单独在这里选择。")
+      .addComponent((container) =>
+        new SecretComponent(this.app, container)
+          .setValue(this.plugin.settings.geminiApiKeySecretName)
+          .onChange(async (value) => {
+            if (!isActivated) {
+              const check = await verifyLicenseCode(this.plugin.settings.licenseCode);
+              if (!check.valid) {
+                new Notice("🔒 请先在上方【软件授权】中激活 Crisp ASR 软件！");
+                return;
+              }
+            }
+            this.plugin.settings.geminiApiKeySecretName = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(tts)
+      .setName("朗读模型")
+      .setDesc("Flash-Lite 更快更省，适合日常朗读；Flash 音质和表现力更好。")
+      .addDropdown((dropdown) => {
+        for (const [id, label] of GEMINI_TTS_MODELS) dropdown.addOption(id, label);
+        dropdown
+          .setValue(this.plugin.settings.ttsModel)
+          .onChange(async (value) => {
+            this.plugin.settings.ttsModel = value as GeminiTtsModel;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(tts)
+      .setName("音色")
+      .setDesc("30 个官方预置音色，都能读中文。")
+      .addDropdown((dropdown) => {
+        for (const [id, tone] of GEMINI_TTS_VOICES) dropdown.addOption(id, `${id} · ${tone}`);
+        dropdown
+          .setValue(this.plugin.settings.ttsVoice)
+          .onChange(async (value) => {
+            this.plugin.settings.ttsVoice = value;
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(tts)
+      .setName("朗读风格")
+      .setDesc("可选。一句简短描述，例如“语速稍慢，平静”。留空效果通常最稳定。")
+      .addText((text) => text
+        .setPlaceholder("留空")
+        .setValue(this.plugin.settings.ttsStyle)
+        .onChange(async (value) => {
+          this.plugin.settings.ttsStyle = value.trim();
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(tts)
+      .setName("试听")
+      .setDesc("用当前模型、音色和风格读一句示例；会消耗少量额度。")
+      .addButton((button) => button
+        .setButtonText("试听")
+        .onClick(async () => {
+          await this.plugin.startReadAloud("你好，这是 Crisp ASR 的朗读试听。");
         }));
 
     // -----------------------------------------------------------------

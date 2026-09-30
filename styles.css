@@ -543,6 +543,26 @@
   height: 12px;
 }
 
+.crisp-asr-read-aloud-actions {
+  display: grid;
+  padding: 0 10px 11px;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.crisp-asr-read-aloud-actions .crisp-asr-button {
+  min-width: 0;
+  padding: 0 7px;
+  font-size: 10px;
+}
+
+.crisp-asr-read-aloud-actions .crisp-asr-button__icon,
+.crisp-asr-read-aloud-actions .crisp-asr-button__icon svg {
+  width: 12px;
+  height: 12px;
+}
+
 .crisp-asr-jobs {
   flex: 0 0 auto;
 }

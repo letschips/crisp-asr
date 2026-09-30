@@ -14,6 +14,17 @@ import {
   type TAbstractFile,
 } from "obsidian";
 import { CRISP_ASR_ICON_ID, ICON_BARS_SCALE_MIDDLE_SVG } from "./icon";
+import { synthesizeGeminiSpeech, type GeminiTtsOptions } from "./gemini-tts";
+import {
+  HtmlAudioSink,
+  ReadAloudSession,
+  type ReadAloudStatus,
+} from "./read-aloud";
+import {
+  markdownFromLine,
+  markdownToSpeechText,
+  splitSpeechChunks,
+} from "./tts-text";
 import {
   providerDisplayName,
   requestAiText,
@@ -150,6 +161,10 @@ export interface CrispAsrUiState {
   smartMode: "idle" | "processing";
   smartProgress: string;
   markers: LiveMarker[];
+  /** 最近一次激活的 Markdown 笔记；焦点移到侧边栏时保留。 */
+  readAloudTargetPath: string | null;
+  /** 正在朗读时的进度；空闲为 null。 */
+  readAloudStatus: ReadAloudStatus | null;
 }
 
 interface LiveSession {
@@ -232,6 +247,8 @@ export default class CrispAsrPlugin extends Plugin {
     smartMode: "idle",
     smartProgress: "",
     markers: [],
+    readAloudTargetPath: null,
+    readAloudStatus: null,
   };
 
   private readonly listeners = new Set<() => void>();
@@ -244,6 +261,8 @@ export default class CrispAsrPlugin extends Plugin {
   private liveStopPromise: Promise<void> | null = null;
   private elapsedTimer: number | null = null;
   private statusBar: HTMLElement | null = null;
+  private readAloud: ReadAloudSession | null = null;
+  private readAloudStatusBar: HTMLElement | null = null;
   private liveStrip: CrispAsrLiveStrip | null = null;
   private smartModal: SmartProcessingModal | null = null;
   private unloaded = false;
@@ -418,6 +437,29 @@ export default class CrispAsrPlugin extends Plugin {
       callback: () => void this.startCreationWorkflow(),
     });
     this.addCommand({
+      id: "read-aloud",
+      name: "朗读选中文本或当前笔记",
+      callback: () => void this.readAloudActiveNote(),
+    });
+    this.addCommand({
+      id: "read-aloud-toggle-pause",
+      name: "暂停/继续朗读",
+      checkCallback: (checking) => {
+        const available = this.readAloud?.isActive === true;
+        if (available && !checking) this.toggleReadAloudPause();
+        return available;
+      },
+    });
+    this.addCommand({
+      id: "read-aloud-stop",
+      name: "停止朗读",
+      checkCallback: (checking) => {
+        const available = this.readAloud?.isActive === true;
+        if (available && !checking) this.readAloud?.stop();
+        return available;
+      },
+    });
+    this.addCommand({
       id: "rename-speakers",
       name: "重命名当前转写的说话人",
       callback: () => void this.renameSpeakersInActiveNote(),
@@ -445,10 +487,26 @@ export default class CrispAsrPlugin extends Plugin {
     this.addSettingTab(new CrispAsrSettingTab(this.app, this));
     this.statusBar = this.addStatusBarItem();
     this.statusBar.addClass("crisp-asr-statusbar");
+    this.readAloudStatusBar = this.addStatusBarItem();
+    this.readAloudStatusBar.addClass("crisp-asr-statusbar", "mod-clickable");
+    this.readAloudStatusBar.setAttr("aria-label", "点击暂停或继续朗读");
+    this.readAloudStatusBar.hide();
+    this.registerDomEvent(
+      this.readAloudStatusBar,
+      "click",
+      () => this.toggleReadAloudPause(),
+    );
 
     this.registerEvent(this.app.workspace.on(
       "file-menu",
       (menu, file) => {
+        if (file instanceof TFile && file.extension === "md") {
+          menu.addItem((item) => item
+            .setTitle("朗读此笔记")
+            .setIcon("volume-2")
+            .onClick(() => void this.readAloudFile(file)));
+          return;
+        }
         if (!(file instanceof TFile) || !isAudioPath(file.path)) {
           return;
         }
@@ -465,8 +523,31 @@ export default class CrispAsrPlugin extends Plugin {
       },
     ));
     this.registerEvent(this.app.workspace.on(
+      "editor-menu",
+      (menu, editor) => {
+        if (editor.getSelection().trim()) {
+          menu.addItem((item) => item
+            .setTitle("朗读选中文字")
+            .setIcon("volume-2")
+            .onClick(() => void this.startReadAloud(editor.getSelection())));
+          return;
+        }
+        menu.addItem((item) => item
+          .setTitle("朗读全文")
+          .setIcon("volume-2")
+          .onClick(() => void this.startReadAloud(editor.getValue())));
+        menu.addItem((item) => item
+          .setTitle("从光标处朗读")
+          .setIcon("text-cursor-input")
+          .onClick(() => void this.startReadAloud(
+            markdownFromLine(editor.getValue(), editor.getCursor("from").line),
+          )));
+      },
+    ));
+    this.registerEvent(this.app.workspace.on(
       "active-leaf-change",
       () => {
+        this.refreshReadAloudTarget();
         void this.refreshSmartTarget();
       },
     ));
@@ -481,6 +562,7 @@ export default class CrispAsrPlugin extends Plugin {
       if (this.getApiKey()) {
         void this.fileQueue?.start();
       }
+      this.refreshReadAloudTarget();
       void this.refreshSmartTarget();
     });
     this.updateStatusBar();
@@ -488,6 +570,8 @@ export default class CrispAsrPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.unloaded = true;
+    this.readAloud?.stop();
+    this.readAloud = null;
     this.unsubscribeMicrophoneChanges?.();
     this.unsubscribeMicrophoneChanges = null;
     await this.stopMicrophoneTest();
@@ -548,6 +632,137 @@ export default class CrispAsrPlugin extends Plugin {
       return false;
     }
     return true;
+  }
+
+  private async readAloudActiveNote(): Promise<void> {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view?.file) {
+      new Notice("请先打开一篇 Markdown 笔记。");
+      return;
+    }
+    const selection = view.getMode() === "source"
+      ? view.editor.getSelection()
+      : activeWindow.getSelection()?.toString() ?? "";
+    await this.startReadAloud(selection.trim() ? selection : view.getViewData());
+  }
+
+  async startReadAloud(markdown: string): Promise<void> {
+    if (!(await this.ensureLicenseActivated())) return;
+    const secretName = this.settings.geminiApiKeySecretName.trim();
+    const apiKey = secretName
+      ? this.app.secretStorage.getSecret(secretName)?.trim()
+      : "";
+    if (!apiKey) {
+      new Notice("请先在 Crisp ASR 设置的【朗读】里选择 Gemini API Key。");
+      return;
+    }
+    const chunks = splitSpeechChunks(markdownToSpeechText(markdown), {
+      firstMaxChars: 80,
+      maxChars: 300,
+    });
+    if (chunks.length === 0) {
+      new Notice("没有可朗读的文字。");
+      return;
+    }
+    this.readAloud?.stop();
+    const options: GeminiTtsOptions = {
+      model: this.settings.ttsModel,
+      voice: this.settings.ttsVoice,
+      style: this.settings.ttsStyle,
+    };
+    const session: ReadAloudSession = new ReadAloudSession(chunks, {
+      synthesize: (text) => this.synthesizeWithRetry(apiKey, text, options),
+      sink: new HtmlAudioSink(),
+      onStatus: (status) => this.renderReadAloudStatus(session, status),
+      prefetch: 1,
+    });
+    this.readAloud = session;
+    new Notice(`正在生成朗读音频（共 ${chunks.length} 段）…`);
+    await session.run();
+  }
+
+  private async synthesizeWithRetry(
+    apiKey: string,
+    text: string,
+    options: GeminiTtsOptions,
+  ): Promise<ArrayBuffer> {
+    try {
+      return (await synthesizeGeminiSpeech(apiKey, text, options)).audio;
+    } catch (error) {
+      if (!(error instanceof AsrServiceError) || !error.retryable) throw error;
+      await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+      return (await synthesizeGeminiSpeech(apiKey, text, options)).audio;
+    }
+  }
+
+  async readAloudFile(file: TFile): Promise<void> {
+    await this.startReadAloud(await this.app.vault.cachedRead(file));
+  }
+
+  async readAloudTarget(): Promise<void> {
+    const path = this.uiState.readAloudTargetPath;
+    const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
+    if (!(file instanceof TFile)) {
+      new Notice("找不到要朗读的笔记，请先打开一篇笔记。");
+      return;
+    }
+    await this.readAloudFile(file);
+  }
+
+  stopReadAloud(): void {
+    this.readAloud?.stop();
+  }
+
+  private refreshReadAloudTarget(): void {
+    const active = this.app.workspace.getActiveFile();
+    if (
+      active instanceof TFile
+      && active.extension === "md"
+      && this.uiState.readAloudTargetPath !== active.path
+    ) {
+      this.uiState.readAloudTargetPath = active.path;
+      this.emit();
+    }
+  }
+
+  toggleReadAloudPause(): void {
+    const session = this.readAloud;
+    if (!session) return;
+    if (session.status.state === "paused") session.resume();
+    else session.pause();
+  }
+
+  private renderReadAloudStatus(
+    session: ReadAloudSession,
+    status: ReadAloudStatus,
+  ): void {
+    if (this.readAloud !== session) return;
+    this.uiState.readAloudStatus = session.isActive ? status : null;
+    this.emit();
+    const bar = this.readAloudStatusBar;
+    const progress = `${status.index + 1}/${status.total}`;
+    switch (status.state) {
+      case "loading":
+        bar?.setText(`朗读 ${progress} · 生成中`);
+        bar?.show();
+        return;
+      case "playing":
+        bar?.setText(`朗读 ${progress}`);
+        bar?.show();
+        return;
+      case "paused":
+        bar?.setText(`朗读已暂停 ${progress}`);
+        bar?.show();
+        return;
+      case "failed":
+        new Notice(`朗读中断（第 ${progress} 段）：${status.error ?? "未知错误"}`);
+        break;
+      case "finished":
+      case "stopped":
+        break;
+    }
+    bar?.hide();
+    this.readAloud = null;
   }
 
   subscribe(listener: () => void): () => void {

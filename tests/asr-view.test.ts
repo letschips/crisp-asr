@@ -528,4 +528,45 @@ describe("Crisp ASR view controls", () => {
         .every((button) => button.disabled),
     ).toBe(true);
   });
+
+  it("reads the last opened note aloud from the panel, and stays disabled without one", async () => {
+    const calls: string[] = [];
+    const idle = viewFor(plugin({ readAloudTarget: async () => { calls.push("start"); } }));
+    await idle.onOpen();
+    const idleCard = idle.contentEl.querySelector(".crisp-asr-read-aloud");
+    expect(idleCard?.textContent).toContain("打开一篇笔记");
+    const idleButton = idleCard?.querySelector<HTMLButtonElement>("button");
+    expect(idleButton?.disabled).toBe(true);
+
+    document.body.replaceChildren();
+    const base = plugin({ readAloudTarget: async () => { calls.push("start"); } });
+    (base.uiState as Record<string, unknown>).readAloudTargetPath = "Notes/周报.md";
+    const ready = viewFor(base);
+    await ready.onOpen();
+    const card = ready.contentEl.querySelector(".crisp-asr-read-aloud");
+    expect(card?.textContent).toContain("周报.md");
+    const buttons = Array.from(card?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+    expect(buttons.map((b) => b.textContent)).toEqual(["朗读当前笔记"]);
+    buttons[0].click();
+    expect(calls).toEqual(["start"]);
+  });
+
+  it("turns the read-aloud card into playback controls while reading", async () => {
+    const calls: string[] = [];
+    const base = plugin({
+      toggleReadAloudPause: () => { calls.push("toggle"); },
+      stopReadAloud: () => { calls.push("stop"); },
+    });
+    (base.uiState as Record<string, unknown>).readAloudTargetPath = "Notes/周报.md";
+    (base.uiState as Record<string, unknown>).readAloudStatus = { state: "paused", index: 1, total: 4 };
+    const view = viewFor(base);
+    await view.onOpen();
+    const card = view.contentEl.querySelector(".crisp-asr-read-aloud");
+    expect(card?.textContent).toContain("2/4 · 已暂停");
+    const buttons = Array.from(card?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+    expect(buttons.map((b) => b.textContent)).toEqual(["继续", "停止"]);
+    buttons[0].click();
+    buttons[1].click();
+    expect(calls).toEqual(["toggle", "stop"]);
+  });
 });

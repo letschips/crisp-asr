@@ -9,6 +9,7 @@ import type { PersistedLiveDraft } from "./live-draft";
 import { DICTATION_PROFILES } from "./dictation-profile";
 import { CRISP_ASR_ICON_ID, ICON_BARS_SCALE_MIDDLE_SVG } from "./icon";
 import { formatLocalMinute } from "./transcript";
+import type { ReadAloudStatus } from "./read-aloud";
 
 export const CRISP_ASR_VIEW_TYPE = "crisp-asr";
 
@@ -32,6 +33,20 @@ interface ViewSnapshot {
   recoveryDraft: PersistedLiveDraft | null;
   dictationProfileId: string;
   markers: readonly unknown[];
+  readAloudTargetPath: string | null;
+  readAloudStatus: ReadAloudStatus | null;
+}
+
+function formatReadAloudStatus(status: ReadAloudStatus): string {
+  const progress = `${status.index + 1}/${status.total}`;
+  switch (status.state) {
+    case "loading":
+      return `${progress} · 生成中`;
+    case "paused":
+      return `${progress} · 已暂停`;
+    default:
+      return `${progress} · 朗读中`;
+  }
 }
 
 function formatJobMessage(job: PersistedFileJob): string {
@@ -154,6 +169,8 @@ export class CrispAsrView extends ItemView {
       recoveryDraft: state.recoveryDraft,
       dictationProfileId: this.plugin.settings.dictationProfileId,
       markers: state.markers,
+      readAloudTargetPath: state.readAloudTargetPath ?? null,
+      readAloudStatus: state.readAloudStatus ?? null,
     };
   }
 
@@ -180,7 +197,9 @@ export class CrispAsrView extends ItemView {
       && left.smartProgress === right.smartProgress
       && left.recoveryDraft === right.recoveryDraft
       && left.dictationProfileId === right.dictationProfileId
-      && left.markers === right.markers;
+      && left.markers === right.markers
+      && left.readAloudTargetPath === right.readAloudTargetPath
+      && left.readAloudStatus === right.readAloudStatus;
   }
 
   private update(): void {
@@ -612,6 +631,49 @@ export class CrispAsrView extends ItemView {
     );
     smart.append(smartHeading, smartDescription, smartActions);
 
+    const readAloud = document.createElement("section");
+    readAloud.className = "crisp-asr-card crisp-asr-read-aloud";
+    const readAloudHeading = document.createElement("div");
+    readAloudHeading.className = "crisp-asr-card__title";
+    const readAloudTitle = document.createElement("strong");
+    readAloudTitle.textContent = "朗读";
+    const readAloudTarget = document.createElement("span");
+    readAloudTarget.textContent = snapshot.readAloudStatus
+      ? formatReadAloudStatus(snapshot.readAloudStatus)
+      : snapshot.readAloudTargetPath
+        ? basename(snapshot.readAloudTargetPath)
+        : "打开一篇笔记";
+    readAloudHeading.append(readAloudTitle, readAloudTarget);
+    const readAloudActions = document.createElement("div");
+    readAloudActions.className = "crisp-asr-read-aloud-actions";
+    if (snapshot.readAloudStatus) {
+      const paused = snapshot.readAloudStatus.state === "paused";
+      createButton(
+        readAloudActions,
+        paused ? "继续" : "暂停",
+        paused ? "play" : "pause",
+        "is-primary",
+        () => this.plugin.toggleReadAloudPause(),
+      );
+      createButton(
+        readAloudActions,
+        "停止",
+        "square",
+        "is-secondary",
+        () => this.plugin.stopReadAloud(),
+      );
+    } else {
+      createButton(
+        readAloudActions,
+        "朗读当前笔记",
+        "volume-2",
+        "is-primary",
+        () => void this.plugin.readAloudTarget(),
+        !snapshot.readAloudTargetPath,
+      );
+    }
+    readAloud.append(readAloudHeading, readAloudActions);
+
     const jobs = document.createElement("section");
     jobs.className = "crisp-asr-card crisp-asr-jobs";
     const jobsHeading = document.createElement("div");
@@ -711,7 +773,7 @@ export class CrispAsrView extends ItemView {
     if (recovery) {
       shell.append(recovery);
     }
-    shell.append(controls, transcript, smart, jobs);
+    shell.append(controls, transcript, smart, readAloud, jobs);
     this.contentEl.append(shell);
     transcriptBody.scrollTop = followedLatest
       ? transcriptBody.scrollHeight
