@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 // 在线校验回归测试：
 // - 服务端返回非 200 的 valid:false（吊销 / 设备数上限）必须采信
@@ -7,14 +7,18 @@ const { requestUrlMock } = vi.hoisted(() => ({ requestUrlMock: vi.fn() }));
 vi.mock("obsidian", () => ({ requestUrl: requestUrlMock }));
 
 import { verifyLicenseCode } from "../src/license";
+import { installLocalTrustAnchor, restoreTrustAnchor, trustedCode } from "./local-license-fixture";
 
-const VALID_SIGNED_CODE =
-  "eyJwcm9kdWN0IjoiQ3Jpc3AgU3VpdGUiLCJsaWNlbnNlSWQiOiJDUklTUC1ST1RBVElPTi1URVNUIiwidXNlck5hbWUiOiJSb3RhdGlvbiBUZXN0IiwiaXNzdWVkQXQiOiIyMDI2LTA3LTMxVDAwOjAwOjAwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDM2LTAxLTAxVDAwOjAwOjAwLjAwMFoiLCJmZWF0dXJlcyI6WyJhbGwiXX0.6vruWbKKt62IMUrNCsAO7KX1VnCquCSo--9soGWi6ImiVhEKSMrmkr5ac_3TJlvoq8neVisTvmq28vbsmEjwCQ";
+// 本地密钥签发的授权码，不使用任何真实授权码（本仓库公开）。
+const VALID_SIGNED_CODE = trustedCode();
 
 describe("license online check", () => {
   beforeAll(() => {
     (globalThis as unknown as { window: unknown }).window = globalThis;
+    installLocalTrustAnchor();
   });
+
+  afterAll(() => restoreTrustAnchor());
 
   it("honors server-side revocation rejection on 403", async () => {
     requestUrlMock.mockResolvedValueOnce({
