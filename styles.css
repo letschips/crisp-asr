@@ -1,12 +1,6 @@
 .workspace-leaf-content[data-type="crisp-asr"] .view-content {
   padding: 0;
-  background:
-    radial-gradient(
-      circle at 88% 4%,
-      color-mix(in srgb, var(--interactive-accent) 12%, transparent),
-      transparent 34%
-    ),
-    var(--background-primary);
+  background: var(--background-primary);
 }
 
 .crisp-asr-view {

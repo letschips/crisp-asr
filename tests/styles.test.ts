@@ -78,4 +78,13 @@ describe("translucent window compatibility", () => {
       ruleFor(".crisp-asr-smart-actions").style.getPropertyValue("display"),
     ).toBe("grid");
   });
+
+  it("keeps the view background plain so desktop and mobile match", () => {
+    const rule = ruleFor(
+      '.workspace-leaf-content[data-type="crisp-asr"] .view-content',
+    );
+
+    expect(rule.cssText).toContain("background");
+    expect(rule.cssText).not.toContain("gradient");
+  });
 });
