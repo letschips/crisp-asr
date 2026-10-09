@@ -411,3 +411,19 @@ describe("untranscribed audio discovery", () => {
       .toEqual(["剪辑/d.webm", "录音/b.mp3"]);
   });
 });
+
+describe("Pulse memo state notifications", () => {
+  it("notifies memo views on queue changes, not on every level-meter or live-text refresh", async () => {
+    const triggered: string[] = [];
+    const app = createApp();
+    (app.workspace as Record<string, unknown>).trigger = (name: string) => triggered.push(name);
+    const plugin = new CrispAsrPlugin(app as never, { id: "crisp-asr" } as never);
+    await plugin.onload();
+    triggered.length = 0;
+    const internals = plugin as unknown as { emit(): void; handleQueueChange(jobs: unknown[]): void };
+    for (let i = 0; i < 20; i++) internals.emit();
+    expect(triggered.filter((name) => name === "crisp-asr:state")).toHaveLength(0);
+    internals.handleQueueChange([{ id: "j1", sourcePath: "a.webm", memoId: "m1", status: "queued", attempt: 0, createdAt: 1, updatedAt: 1 }]);
+    expect(triggered.filter((name) => name === "crisp-asr:state")).toHaveLength(1);
+  });
+});

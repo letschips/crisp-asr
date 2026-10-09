@@ -226,6 +226,8 @@ export function collectTranscribedAudioPaths<TFileLike extends { path: string }>
   return paths;
 }
 
+const MEMO_SILENCE_MESSAGE = "录音里没有识别到说话声，录音已保留。如果录的时候说了话，请检查麦克风权限（macOS：系统设置 → 隐私与安全性 → 麦克风）";
+
 export default class CrispAsrPlugin extends Plugin {
   settings: CrispAsrSettings = { ...DEFAULT_SETTINGS };
   uiState: CrispAsrUiState = {
@@ -337,7 +339,7 @@ export default class CrispAsrPlugin extends Plugin {
       run: (job) => this.runFileJob(job),
       persist: async (jobs) => {
         this.settings.fileJobs = jobs;
-        await this.persistSettings();
+        if (!(await this.persistSettings())) throw new Error("转写队列保存失败，请重试");
       },
       createId: () => safeRandomUUID(),
       onChange: (jobs) => this.handleQueueChange(jobs),
@@ -566,10 +568,12 @@ export default class CrispAsrPlugin extends Plugin {
       void this.refreshSmartTarget();
     });
     this.updateStatusBar();
+    this.notifyMemoViews();
   }
 
   async onunload(): Promise<void> {
     this.unloaded = true;
+    this.notifyMemoViews();
     this.readAloud?.stop();
     this.readAloud = null;
     this.unsubscribeMicrophoneChanges?.();
@@ -1232,6 +1236,39 @@ export default class CrispAsrPlugin extends Plugin {
     new Notice(`Crisp ASR：${file.name} 已加入转写队列`);
   }
 
+  /** Manual Pulse entry: never changes the ASR output preference or opens another note. */
+  async transcribeMemoAudio(file: TFile, target: { memoId: string; path: string }): Promise<PersistedFileJob> {
+    if (this.unloaded || !this.fileQueue) throw new Error("Crisp ASR 尚未就绪，请重试");
+    if (!(await this.ensureLicenseActivated())) throw new Error("请先在 Crisp ASR 设置中完成激活");
+    if (!isAudioPath(file.path) || !/^[a-zA-Z0-9-]+$/.test(target.memoId)) throw new Error("速记音频或标识无效");
+    // A completed job is reused only by Pulse's receipt check; once the user removes that transcript, transcribe again.
+    const previous = [...this.fileQueue.jobs()].reverse().find((job) => job.memoId === target.memoId && job.sourcePath === file.path && job.status !== "completed");
+    if (!previous?.transcriptText && !this.getApiKey()) throw new Error("请先在 Crisp ASR 设置中配置语音识别 API Key");
+    if (previous) {
+      if (previous.status === "failed") await this.fileQueue.retry(previous.id);
+      await this.fileQueue.start();
+      return this.fileQueue.jobs().find((job) => job.id === previous.id)!;
+    }
+    const job = await this.fileQueue.enqueue(file.path, target.path, target.memoId);
+    if (!job) throw new Error("这段录音已经在转写队列中");
+    await this.fileQueue.start();
+    return job;
+  }
+
+  getMemoTranscriptionJobs(): PersistedFileJob[] {
+    return this.unloaded ? [] : (this.fileQueue?.jobs().filter((job) => job.memoId) ?? []);
+  }
+
+  private memoDestination() {
+    const plugins = (this.app as unknown as { plugins: { plugins: Record<string, unknown> } }).plugins.plugins;
+    const pulse = plugins["crisp-pulse"] as {
+      validateMemoTranscriptionTarget?: (job: { memoId: string; path: string; sourcePath: string }) => Promise<{ path: string }>;
+      applyMemoTranscript?: (job: { memoId: string; path: string; sourcePath: string; jobId: string; text: string }) => Promise<{ path: string }>;
+    } | undefined;
+    if (!pulse?.applyMemoTranscript || !pulse.validateMemoTranscriptionTarget) throw new AsrServiceError("请启用 Crisp Pulse 1.15.0 或更高版本后重试", false);
+    return pulse as Required<typeof pulse>;
+  }
+
   async scanUntranscribedRecordings(): Promise<void> {
     if (!(await this.ensureLicenseActivated())) return;
     if (!this.getApiKey()) {
@@ -1316,6 +1353,12 @@ export default class CrispAsrPlugin extends Plugin {
   private async runFileJob(
     job: PersistedFileJob,
   ): Promise<{ outputPath: string }> {
+    if (job.memoId && job.transcriptText) {
+      const written = await this.memoDestination().applyMemoTranscript({ memoId: job.memoId, path: job.targetPath || "", sourcePath: job.sourcePath, jobId: job.id, text: job.transcriptText });
+      this.rememberProcessed(job.sourcePath);
+      return { outputPath: written.path };
+    }
+    if (job.memoId) await this.memoDestination().validateMemoTranscriptionTarget({ memoId: job.memoId, path: job.targetPath || "", sourcePath: job.sourcePath });
     const apiKey = this.getApiKey();
     if (!apiKey) {
       const engine = this.settings.sttEngine === "gemini" ? "Gemini" : "豆包";
@@ -1349,21 +1392,37 @@ export default class CrispAsrPlugin extends Plugin {
       );
     }
     let result: FlashResponse;
-    if (this.settings.sttEngine === "gemini") {
-      const mimeType = geminiUploadMimeType(source.path, transcodedToWav);
-      const customVocab = this.getCustomVocabularyList();
-      result = await transcribeGeminiFile(apiKey, audio, mimeType, {
-        mode: this.settings.geminiMode,
-        identifySpeakers: this.settings.geminiIdentifySpeakers,
-        wordTimestamps: this.settings.geminiWordTimestamps,
-        customVocabulary: customVocab.length > 0 ? customVocab : undefined,
-      });
-    } else {
-      result = await transcribeFlash(
-        apiKey,
-        audio,
-        await this.buildRecognition(target, false),
-      );
+    try {
+      if (this.settings.sttEngine === "gemini") {
+        const mimeType = geminiUploadMimeType(source.path, transcodedToWav);
+        const customVocab = this.getCustomVocabularyList();
+        result = await transcribeGeminiFile(apiKey, audio, mimeType, {
+          mode: this.settings.geminiMode,
+          identifySpeakers: this.settings.geminiIdentifySpeakers,
+          wordTimestamps: this.settings.geminiWordTimestamps,
+          customVocabulary: customVocab.length > 0 ? customVocab : undefined,
+        });
+      } else {
+        result = await transcribeFlash(
+          apiKey,
+          audio,
+          await this.buildRecognition(target, false),
+        );
+      }
+    } catch (error) {
+      // Doubao reports silent audio as 20000003 and Gemini as an empty result; for a memo that almost always means the microphone captured nothing.
+      if (job.memoId && /20000003|no valid speech|no speech|服务返回了空结果/i.test(error instanceof Error ? error.message : String(error))) {
+        throw new AsrServiceError(MEMO_SILENCE_MESSAGE, false, { cause: error });
+      }
+      throw error;
+    }
+    if (job.memoId) {
+      const text = result.text.trim();
+      if (!text) throw new AsrServiceError(MEMO_SILENCE_MESSAGE, false);
+      await this.fileQueue!.cacheMemoTranscript(job.id, text);
+      const written = await this.memoDestination().applyMemoTranscript({ memoId: job.memoId, path: job.targetPath || "", sourcePath: source.path, jobId: job.id, text });
+      this.rememberProcessed(source.path);
+      return { outputPath: written.path };
     }
     const output = await this.writeFileTranscript(source, target, result);
     this.uiState.smartTargetPath = output.path;
@@ -2260,6 +2319,8 @@ export default class CrispAsrPlugin extends Plugin {
   private handleQueueChange(jobs: PersistedFileJob[]): void {
     this.settings.fileJobs = jobs;
     this.uiState.jobs = jobs;
+    // Pulse only needs queue snapshots; level meters and live text would otherwise re-render its cards many times a second.
+    this.notifyMemoViews();
     for (const job of jobs) {
       const previous = this.jobStatuses.get(job.id);
       if (previous !== job.status) {
@@ -2294,6 +2355,10 @@ export default class CrispAsrPlugin extends Plugin {
     } else {
       this.statusBar.hide();
     }
+  }
+
+  private notifyMemoViews(): void {
+    this.app.workspace.trigger?.("crisp-asr:state");
   }
 
   private emit(): void {

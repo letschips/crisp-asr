@@ -99,9 +99,10 @@ export class TranscriptionQueue {
   async enqueue(
     sourcePath: string,
     targetPath?: string,
+    memoId?: string,
   ): Promise<PersistedFileJob | null> {
     if (this.storedJobs.some((job) =>
-      job.sourcePath === sourcePath && NON_TERMINAL.has(job.status)
+      job.sourcePath === sourcePath && job.memoId === memoId && NON_TERMINAL.has(job.status)
     )) {
       return null;
     }
@@ -111,13 +112,19 @@ export class TranscriptionQueue {
         ?? `${now}-${Math.random().toString(36).slice(2, 10)}`,
       sourcePath,
       ...(targetPath ? { targetPath } : {}),
+      ...(memoId ? { memoId } : {}),
       status: "queued",
       attempt: 0,
       createdAt: now,
       updatedAt: now,
     };
     this.storedJobs.push(entry);
-    await this.commit();
+    try {
+      await this.commit();
+    } catch (error) {
+      this.storedJobs = this.storedJobs.filter((job) => job.id !== entry.id);
+      throw error;
+    }
     this.kick();
     return cloneJob(entry);
   }
@@ -133,6 +140,13 @@ export class TranscriptionQueue {
       }
     }
     this.kick();
+  }
+
+  async cacheMemoTranscript(id: string, text: string): Promise<void> {
+    const job = this.storedJobs.find((entry) => entry.id === id);
+    if (!job?.memoId) throw new Error("速记转写任务已不存在");
+    job.transcriptText = text;
+    await this.commit();
   }
 
   stop(): void {

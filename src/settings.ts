@@ -40,6 +40,10 @@ export interface PersistedFileJob {
   id: string;
   sourcePath: string;
   targetPath?: string;
+  /** Stable Pulse memo destination; independent of the active note/output preference. */
+  memoId?: string;
+  /** Recognition checkpoint retained when writing into the memo needs a retry. */
+  transcriptText?: string;
   status: FileJobStatus;
   attempt: number;
   createdAt: number;
@@ -212,10 +216,14 @@ function normalizeFileJobs(value: unknown): PersistedFileJob[] {
     const nextAttemptAt = optionalNumber(candidate, "nextAttemptAt");
     const lastError = optionalString(candidate, "lastError");
     const outputPath = optionalString(candidate, "outputPath");
+    const memoId = optionalString(candidate, "memoId");
+    const transcriptText = optionalString(candidate, "transcriptText");
     return [{
       id,
       sourcePath,
       ...(targetPath ? { targetPath } : {}),
+      ...(memoId ? { memoId } : {}),
+      ...(memoId && transcriptText ? { transcriptText } : {}),
       status: status as FileJobStatus,
       attempt: Math.floor(attempt),
       createdAt,
