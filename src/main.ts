@@ -167,7 +167,18 @@ export interface CrispAsrUiState {
   readAloudStatus: ReadAloudStatus | null;
 }
 
+/** Where Pulse receives hold-to-dictate text; the session then writes no note. */
+export interface MemoDictationSink {
+  onState?(state: "connecting" | "listening" | "finishing"): void;
+  /** Settled text so far and the not-yet-settled tail. */
+  onText?(text: string, preview: string): void;
+  /** Called exactly once per started session; text is "" when cancelled before connecting. */
+  onDone(result: { text: string; error?: string }): void;
+}
+
 interface LiveSession {
+  /** Set for Pulse memo dictation: text goes to this sink instead of a note. */
+  memo?: MemoDictationSink;
   client: DoubaoStreamingClient | GeminiStreamingClient | DoubaoMobileRecorderClient;
   capture: LivePcmCapture;
   recorder?: LiveAudioRecorder;
@@ -1476,15 +1487,17 @@ export default class CrispAsrPlugin extends Plugin {
     }
   }
 
-  private async runLiveStart(startAbort: AbortController): Promise<void> {
+  private async runLiveStart(startAbort: AbortController, memo?: MemoDictationSink): Promise<void> {
     const apiKey = this.getApiKey();
     if (!apiKey) {
       this.showMissingKey();
       return;
     }
     const accumulator = new TranscriptAccumulator();
-    const target = this.app.workspace.getActiveViewOfType(MarkdownView)?.file
+    // Memo dictation belongs to the Pulse composer, never to whichever note happens to be active.
+    const target = memo ? null : this.app.workspace.getActiveViewOfType(MarkdownView)?.file
       ?? null;
+    const settledText = () => accumulator.utterances().map((utterance) => utterance.text).join("\n").trim();
     const startedAt = new Date().toISOString();
     const recognition = await this.buildRecognition(target, true);
     let sessionLogId: string | undefined;
@@ -1503,6 +1516,7 @@ export default class CrispAsrPlugin extends Plugin {
           const update = accumulator.consume(result);
           this.uiState.preview = update.preview;
           this.uiState.finalized = accumulator.utterances();
+          memo?.onText?.(settledText(), update.preview);
           const activeSession = this.liveSession;
           if (update.added.length > 0 && activeSession?.accumulator === accumulator) {
             this.scheduleLiveDraftCheckpoint(activeSession);
@@ -1540,6 +1554,7 @@ export default class CrispAsrPlugin extends Plugin {
           const update = accumulator.consume(result);
           this.uiState.preview = update.preview;
           this.uiState.finalized = accumulator.utterances();
+          memo?.onText?.(settledText(), update.preview);
           const activeSession = this.liveSession;
           if (update.added.length > 0 && activeSession?.accumulator === accumulator) {
             this.scheduleLiveDraftCheckpoint(activeSession);
@@ -1570,6 +1585,7 @@ export default class CrispAsrPlugin extends Plugin {
           const update = accumulator.consume(result);
           this.uiState.preview = update.preview;
           this.uiState.finalized = accumulator.utterances();
+          memo?.onText?.(settledText(), update.preview);
           const activeSession = this.liveSession;
           if (update.added.length > 0 && activeSession?.accumulator === accumulator) {
             this.scheduleLiveDraftCheckpoint(activeSession);
@@ -1647,7 +1663,7 @@ export default class CrispAsrPlugin extends Plugin {
           }),
       },
     );
-    const recorder = this.settings.saveLiveAudio
+    const recorder = this.settings.saveLiveAudio && !memo
       ? new LiveAudioRecorder({
         Recorder: window.MediaRecorder,
         adapter: this.app.vault.adapter,
@@ -1670,14 +1686,19 @@ export default class CrispAsrPlugin extends Plugin {
       inputLevel: 0,
     };
     this.emit();
-    const openingView = this.openView();
+    // Memo dictation keeps focus in the Pulse composer; the ASR panel is not opened.
+    const openingView = memo ? Promise.resolve() : this.openView();
     try {
       await startLiveResources(resources, startAbort.signal);
       await openingView;
       if (startupError) {
         throw startupError;
       }
+      if (startAbort.signal.aborted) {
+        throw new Error("实时听写启动已取消");
+      }
       this.liveSession = {
+        ...(memo ? { memo } : {}),
         client,
         capture,
         ...(recorder ? { recorder } : {}),
@@ -1708,6 +1729,7 @@ export default class CrispAsrPlugin extends Plugin {
       this.uiState.status = isMobileDoubao ? "正在录音…" : "正在听写";
       this.elapsedTimer = window.setInterval(() => this.emit(), 1_000);
       this.emit();
+      memo?.onState?.("listening");
       if (inputEndedDuringStartup) {
         await this.stopLiveTranscription(
           new Error("音频输入已经结束，已保存当前转写"),
@@ -1725,7 +1747,52 @@ export default class CrispAsrPlugin extends Plugin {
       this.uiState.status = "启动失败";
       this.uiState.inputLevel = 0;
       this.emit();
+      if (memo) throw error;
       new Notice(`Crisp ASR 无法开始听写：${message}`, 8_000);
+    }
+  }
+
+  /**
+   * Pulse hold-to-dictate: streams recognised text to the memo composer. Resolves once listening;
+   * rejects (before any connection where possible) when it cannot start. The sink's onDone is
+   * called exactly once after a successful start, or with "" when cancelled during startup.
+   */
+  async startMemoDictation(sink: MemoDictationSink): Promise<void> {
+    if (this.unloaded) throw new Error("Crisp ASR 已停用");
+    if (this.liveSession || this.liveStarting) throw new Error("实时听写正在进行，请先结束");
+    if (!(await this.ensureLicenseActivated())) throw new Error("请先在 Crisp ASR 设置中完成激活");
+    if (!this.getApiKey()) throw new Error("请先在 Crisp ASR 设置中配置语音识别 API Key");
+    await this.stopMicrophoneTest();
+    if (this.liveSession || this.liveStarting) throw new Error("实时听写正在进行，请先结束");
+    this.liveStarting = true;
+    const startAbort = new AbortController();
+    this.liveStartAbort = startAbort;
+    sink.onState?.("connecting");
+    try {
+      await this.runLiveStart(startAbort, sink);
+    } catch (error) {
+      if (!startAbort.signal.aborted) throw error;
+    } finally {
+      if (this.liveStartAbort === startAbort) this.liveStartAbort = null;
+      this.liveStarting = false;
+    }
+    if (startAbort.signal.aborted) {
+      sink.onDone({ text: "" });
+      return;
+    }
+    // runLiveStart sets the session across awaits; TypeScript still narrows it from the check above.
+    if ((this.liveSession as LiveSession | null)?.memo !== sink) throw new Error("实时听写没有开始");
+  }
+
+  /** Ends the Pulse dictation (or cancels it while connecting); note dictation is left alone. */
+  async stopMemoDictation(): Promise<void> {
+    if (this.liveSession?.memo) return this.stopLiveTranscription();
+    if (!this.liveSession && this.liveStarting && this.liveStartAbort) {
+      this.liveStartAbort.abort();
+      this.uiState.mode = "idle";
+      this.uiState.status = "就绪";
+      this.uiState.inputLevel = 0;
+      this.emit();
     }
   }
 
@@ -1756,6 +1823,8 @@ export default class CrispAsrPlugin extends Plugin {
     reason?: Error,
   ): Promise<void> {
     this.uiState.mode = "finishing";
+    session.memo?.onState?.("finishing");
+    let memoDelivered = false;
     const isMobileDoubao = session.provider === "Doubao" && isMobileEnvironment();
     this.uiState.status = isMobileDoubao ? "正在极速转写…" : "正在收尾";
     this.emit();
@@ -1773,7 +1842,11 @@ export default class CrispAsrPlugin extends Plugin {
       }
       await this.flushLiveDraft(session);
       const text = session.accumulator.finalText().trim();
-      if (text.length > 0) {
+      const terminalError = reason ?? result.finishError;
+      if (session.memo) {
+        memoDelivered = true;
+        session.memo.onDone({ text, ...(terminalError ? { error: terminalError.message } : {}) });
+      } else if (text.length > 0) {
         const output = await this.writeLiveTranscript(
           session,
           text,
@@ -1799,8 +1872,7 @@ export default class CrispAsrPlugin extends Plugin {
         this.uiState.recoveryDraft = null;
         await this.persistSettings();
       }
-      const terminalError = reason ?? result.finishError;
-      if (terminalError) {
+      if (terminalError && !session.memo) {
         new Notice(`Crisp ASR：${terminalError.message}`, 8_000);
       }
       this.uiState.mode = "idle";
@@ -1810,7 +1882,11 @@ export default class CrispAsrPlugin extends Plugin {
       this.uiState.mode = "error";
       this.uiState.status = "写入失败";
       this.uiState.recoveryDraft = this.settings.liveDraft;
-      new Notice(`Crisp ASR 收尾失败：${message}`, 8_000);
+      if (session.memo && !memoDelivered) {
+        session.memo.onDone({ text: session.accumulator.finalText().trim(), error: message });
+      } else {
+        new Notice(`Crisp ASR 收尾失败：${message}`, 8_000);
+      }
     } finally {
       await closeLiveResources(session);
       if (this.liveSession === session) {

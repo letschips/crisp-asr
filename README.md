@@ -4,6 +4,16 @@ Crisp ASR is an Obsidian plugin by **letschips** for desktop and mobile that
 connects directly to Doubao Speech Recognition or Google Gemini 3.5 Transcribe,
 and reads notes aloud with Google Gemini 3.8 TTS.
 
+## Version 0.9.0
+
+新增：在 Crisp Pulse 的速记输入框里长按麦克风实时听写。
+
+- 需要 Pulse 1.16.0 或更高版本。按住麦克风说话，文字边说边出现在输入框的光标处，松开结束；轻点麦克风仍是录音。
+- 使用 ASR 当前的识别引擎和密钥。听写的文字只进速记输入框，不写入当前笔记，也不打开 ASR 面板。
+- 这种模式下不保存实时录音，文字发送前可以在输入框里修改。
+- 正在给笔记听写时，速记的长按听写会提示先结束那一边。连接还没建立就松开会直接取消；中途断线时已识别的文字保留在输入框里。
+- 手机上用豆包时，和笔记听写一样是录完后再极速转写，文字在松开后出现。
+
 ## Version 0.8.0
 
 新增：给 Crisp Pulse 的录音速记转文字。
