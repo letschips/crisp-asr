@@ -146,6 +146,58 @@ describe("AI text processing settings", () => {
     ).toBe("https://llm.example.com/v1");
   });
 
+  it("offers current DeepSeek models and a thinking control only for DeepSeek", async () => {
+    const deepseek = plugin();
+    const settings = deepseek.settings as Record<string, unknown>;
+    settings.aiProvider = "deepseek";
+    settings.aiModel = "deepseek-flash";
+    settings.aiThinking = "off";
+    const tab = new CrispAsrSettingTab({} as never, deepseek as never);
+
+    tab.display();
+
+    const settingNamed = (name: string) => Array.from(
+      tab.containerEl.querySelectorAll<HTMLElement>(".setting-item"),
+    ).find((element) =>
+      element.querySelector(".setting-item-name")?.textContent === name
+    );
+    const modelSelect = settingNamed("AI 模型")?.querySelector("select");
+    expect(Array.from(modelSelect?.options ?? []).map((o) => o.value))
+      .toEqual(["deepseek-flash", "deepseek-v4-pro", "__custom__"]);
+    expect(modelSelect?.value).toBe("deepseek-flash");
+    expect(settingNamed("AI 模型")?.querySelector("input")).toBeNull();
+    const thinking = settingNamed("思考模式")?.querySelector("select");
+    expect(thinking?.value).toBe("off");
+
+    thinking!.value = "high";
+    thinking!.dispatchEvent(new Event("change"));
+    await Promise.resolve();
+    expect(settings.aiThinking).toBe("high");
+
+    const claude = new CrispAsrSettingTab({} as never, plugin() as never);
+    claude.display();
+    expect(claude.containerEl.textContent).not.toContain("思考模式");
+  });
+
+  it("selects deepseek-flash when switching to DeepSeek with another provider's model", async () => {
+    const host = plugin();
+    const settings = host.settings as Record<string, unknown>;
+    const tab = new CrispAsrSettingTab({} as never, host as never);
+    tab.display();
+
+    const provider = Array.from(
+      tab.containerEl.querySelectorAll<HTMLElement>(".setting-item"),
+    ).find((element) =>
+      element.querySelector(".setting-item-name")?.textContent === "AI 服务商"
+    )?.querySelector("select");
+    provider!.value = "deepseek";
+    provider!.dispatchEvent(new Event("change"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(settings.aiProvider).toBe("deepseek");
+    expect(settings.aiModel).toBe("deepseek-flash");
+  });
+
   it("shows the iPhone shortcut QR download entry", () => {
     const tab = new CrispAsrSettingTab({} as never, plugin() as never);
 

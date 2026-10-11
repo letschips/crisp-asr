@@ -912,6 +912,7 @@ export default class CrispAsrPlugin extends Plugin {
         apiKey,
         model: this.settings.aiModel,
         baseUrl: this.settings.aiBaseUrl,
+        thinking: this.settings.aiThinking,
         systemPrompt: "这是连接测试。只回复 OK，不要输出其他内容。",
         userPrompt: "OK",
       }, (request) => this.sendAiHttpRequest(request));
@@ -977,6 +978,7 @@ export default class CrispAsrPlugin extends Plugin {
               apiKey,
               model: this.settings.aiModel,
               baseUrl: this.settings.aiBaseUrl,
+              thinking: this.settings.aiThinking,
               systemPrompt: prompts.systemPrompt,
               userPrompt: prompts.userPrompt,
             }, (request) => this.sendAiHttpRequest(request)),
@@ -1037,6 +1039,7 @@ export default class CrispAsrPlugin extends Plugin {
               apiKey,
               model: this.settings.aiModel,
               baseUrl: this.settings.aiBaseUrl,
+              thinking: this.settings.aiThinking,
               systemPrompt: prompts.systemPrompt,
               userPrompt: prompts.userPrompt,
             }, (request) => this.sendAiHttpRequest(request)),

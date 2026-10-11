@@ -195,6 +195,12 @@ engine and adds an optional, separate AI text-processing layer.
   endpoint.
 - Ark, OpenAI, DeepSeek, and custom endpoints use the Chat Completions
   contract. Claude uses the native Anthropic Messages contract.
+- DeepSeek offers its current models in a dropdown: `deepseek-flash`
+  (V4.1 Flash, default) and `deepseek-v4-pro`. Retired names
+  (`deepseek-chat`, `deepseek-reasoner`, `deepseek-v4-flash`) are moved to
+  `deepseek-flash` automatically; `deepseek-reasoner` keeps thinking on.
+- DeepSeek thinking mode is off by default for faster, cheaper polishing and
+  can be set to low, high, or max.
 - The text-model Secret and model name are independent from the Doubao Speech
   Recognition Secret.
 - Provider presets keep their official Base URL. The custom provider accepts a

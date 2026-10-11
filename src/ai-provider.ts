@@ -1,4 +1,4 @@
-import type { AiProvider } from "./settings";
+import type { AiProvider, AiThinking } from "./settings";
 
 export interface AiHttpRequest {
   url: string;
@@ -22,8 +22,45 @@ export interface AiTextRequest {
   apiKey: string;
   model: string;
   baseUrl?: string;
+  /** DeepSeek only; other providers ignore it. Defaults to off. */
+  thinking?: AiThinking;
   systemPrompt: string;
   userPrompt: string;
+}
+
+/** Current DeepSeek API model IDs (api-docs.deepseek.com, reviewed 2026-10-11). */
+export const DEEPSEEK_MODELS: ReadonlyArray<readonly [string, string]> = [
+  ["deepseek-flash", "DeepSeek V4.1 Flash（推荐）"],
+  ["deepseek-v4-pro", "DeepSeek V4 Pro"],
+];
+
+export const DEFAULT_DEEPSEEK_MODEL = "deepseek-flash";
+
+/** Retired or temporarily routed IDs that DeepSeek no longer serves as named. */
+const RETIRED_DEEPSEEK_MODELS = new Set([
+  "deepseek-chat",
+  "deepseek-reasoner",
+  "deepseek-v4-flash",
+  "deepseek-v4-flash-vision-exp",
+]);
+
+/** Non-thinking replies default to 8K tokens, too short for a 12K-character chunk. */
+const DEEPSEEK_NON_THINKING_MAX_TOKENS = 32_768;
+
+export function normalizeDeepSeekModel(model: string): string {
+  const trimmed = model.trim();
+  return !trimmed || RETIRED_DEEPSEEK_MODELS.has(trimmed)
+    ? DEFAULT_DEEPSEEK_MODEL
+    : trimmed;
+}
+
+function deepSeekOptions(thinking: AiThinking | undefined): Record<string, unknown> {
+  return !thinking || thinking === "off"
+    ? {
+      thinking: { type: "disabled" },
+      max_tokens: DEEPSEEK_NON_THINKING_MAX_TOKENS,
+    }
+    : { thinking: { type: "enabled" }, reasoning_effort: thinking };
 }
 
 const PROVIDER_NAMES: Record<AiProvider, string> = {
@@ -136,7 +173,10 @@ export async function requestAiText(
   request: AiHttpRequester,
 ): Promise<string> {
   const apiKey = input.apiKey.trim();
-  const model = input.model.trim();
+  const deepseek = input.provider === "deepseek";
+  const model = deepseek
+    ? normalizeDeepSeekModel(input.model)
+    : input.model.trim();
   if (!apiKey) {
     throw new AiProviderError("请先选择或创建 AI API Key");
   }
@@ -175,6 +215,7 @@ export async function requestAiText(
           { role: "user", content: input.userPrompt },
         ],
         stream: false,
+        ...(deepseek ? deepSeekOptions(input.thinking) : {}),
       }),
     };
   let response: AiHttpResponse;
@@ -188,10 +229,15 @@ export async function requestAiText(
   }
   if (response.status < 200 || response.status >= 300) {
     const detail = extractErrorMessage(response.json, response.text);
+    const hint = deepseek
+      && (response.status === 400 || response.status === 404)
+      && /model/i.test(detail)
+      ? `；DeepSeek 可能已下线模型 ${model}，请在设置里改用 ${DEFAULT_DEEPSEEK_MODEL}`
+      : "";
     throw new AiProviderError(
       `${providerDisplayName(input.provider)} 请求失败（${
         response.status
-      }）：${detail}`,
+      }）：${detail}${hint}`,
       response.status,
     );
   }

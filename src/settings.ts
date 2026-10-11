@@ -11,6 +11,7 @@ import {
   GEMINI_TTS_VOICES,
   type GeminiTtsModel,
 } from "./gemini-tts";
+import { normalizeDeepSeekModel } from "./ai-provider";
 
 export type SttEngine = "doubao" | "gemini";
 export type GeminiMode = "smart" | "verbatim";
@@ -21,6 +22,9 @@ export type AiProvider =
   | "anthropic"
   | "deepseek"
   | "custom";
+
+/** DeepSeek thinking mode: off, or a reasoning_effort level. */
+export type AiThinking = "off" | "low" | "high" | "max";
 
 export type AiOutputMode = "same-note" | "new-note";
 
@@ -68,6 +72,7 @@ export interface CrispAsrSettings {
   aiApiKeySecretName: string;
   aiModel: string;
   aiBaseUrl: string;
+  aiThinking: AiThinking;
   aiOutputMode: AiOutputMode;
   customPrompt: string;
   autoTranscribeRecordings: boolean;
@@ -110,6 +115,7 @@ export const DEFAULT_SETTINGS: CrispAsrSettings = {
   aiApiKeySecretName: "",
   aiModel: "",
   aiBaseUrl: "",
+  aiThinking: "off",
   aiOutputMode: "same-note",
   customPrompt: "",
   autoTranscribeRecordings: false,
@@ -247,6 +253,13 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
       .map((path) => path.trim())
       .slice(-5_000)
     : [];
+  const aiProvider: AiProvider = candidate.aiProvider === "openai"
+    || candidate.aiProvider === "anthropic"
+    || candidate.aiProvider === "deepseek"
+    || candidate.aiProvider === "custom"
+    ? candidate.aiProvider
+    : "ark";
+  const storedAiModel = cleanText(candidate.aiModel);
   return {
     sttEngine: candidate.sttEngine === "gemini" ? "gemini" : "doubao",
     apiKeySecretName: typeof candidate.apiKeySecretName === "string"
@@ -266,16 +279,21 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
       ? candidate.ttsVoice as string
       : DEFAULT_SETTINGS.ttsVoice,
     ttsStyle: cleanText(candidate.ttsStyle),
-    aiProvider:
-      candidate.aiProvider === "openai"
-      || candidate.aiProvider === "anthropic"
-      || candidate.aiProvider === "deepseek"
-      || candidate.aiProvider === "custom"
-        ? candidate.aiProvider
-        : "ark",
+    aiProvider,
     aiApiKeySecretName: cleanText(candidate.aiApiKeySecretName),
-    aiModel: cleanText(candidate.aiModel),
+    aiModel: aiProvider === "deepseek"
+      ? normalizeDeepSeekModel(storedAiModel)
+      : storedAiModel,
     aiBaseUrl: cleanUrl(candidate.aiBaseUrl),
+    aiThinking: candidate.aiThinking === "low"
+      || candidate.aiThinking === "high"
+      || candidate.aiThinking === "max"
+      || candidate.aiThinking === "off"
+      ? candidate.aiThinking
+      // deepseek-reasoner always thought; keep that when moving it to deepseek-flash.
+      : aiProvider === "deepseek" && storedAiModel === "deepseek-reasoner"
+        ? "high"
+        : "off",
     aiOutputMode: candidate.aiOutputMode === "new-note"
       ? "new-note"
       : "same-note",

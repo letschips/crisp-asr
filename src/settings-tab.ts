@@ -10,6 +10,7 @@ import { renderAboutCard } from "./settings-about";
 import type { AiProvider } from "./settings";
 import type { SilenceAction, SilenceDurationSeconds } from "./settings";
 import { verifyLicenseCode } from "./license";
+import { DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL } from "./ai-provider";
 import shortcutQrCode from "./assets/shortcut-qr.png";
 import { DICTATION_PROFILES, type DictationProfileId } from "./dictation-profile";
 import {
@@ -402,6 +403,12 @@ export class CrispAsrSettingTab extends PluginSettingTab {
             )
             ? value as AiProvider
             : "ark";
+          if (
+            this.plugin.settings.aiProvider === "deepseek"
+            && !this.plugin.settings.aiModel.startsWith("deepseek")
+          ) {
+            this.plugin.settings.aiModel = DEFAULT_DEEPSEEK_MODEL;
+          }
           await this.plugin.saveSettings();
           this.display();
         }));
@@ -429,20 +436,68 @@ export class CrispAsrSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(ai)
-      .setName("AI 模型")
-      .setDesc("填写服务商控制台中的模型名称或接入点 ID。")
-      .addText((text) => text
-        .setPlaceholder(
-          this.plugin.settings.aiProvider === "anthropic"
-            ? "例如：Claude 模型名称"
-            : "例如：服务商提供的模型 ID",
-        )
-        .setValue(this.plugin.settings.aiModel)
-        .onChange(async (value) => {
-          this.plugin.settings.aiModel = value.trim();
-          await this.plugin.saveSettings();
-        }));
+    const deepseekPreset = DEEPSEEK_MODELS.some(
+      ([id]) => id === this.plugin.settings.aiModel,
+    );
+    if (this.plugin.settings.aiProvider === "deepseek") {
+      const modelSetting = new Setting(ai)
+        .setName("AI 模型")
+        .setDesc("deepseek-chat、deepseek-reasoner 已停用，旧设置会自动改用 deepseek-flash。")
+        .addDropdown((dropdown) => {
+          for (const [id, label] of DEEPSEEK_MODELS) {
+            dropdown.addOption(id, label);
+          }
+          dropdown
+            .addOption("__custom__", "其他（手动填写）")
+            .setValue(deepseekPreset ? this.plugin.settings.aiModel : "__custom__")
+            .onChange(async (value) => {
+              this.plugin.settings.aiModel = value === "__custom__" ? "" : value;
+              await this.plugin.saveSettings();
+              this.display();
+            });
+        });
+      if (!deepseekPreset) {
+        modelSetting.addText((text) => text
+          .setPlaceholder(DEFAULT_DEEPSEEK_MODEL)
+          .setValue(this.plugin.settings.aiModel)
+          .onChange(async (value) => {
+            this.plugin.settings.aiModel = value.trim();
+            await this.plugin.saveSettings();
+          }));
+      }
+      new Setting(ai)
+        .setName("思考模式")
+        .setDesc("润色和提炼一般不需要思考；开启后更慢、费用更高。")
+        .addDropdown((dropdown) => dropdown
+          .addOption("off", "关闭（推荐）")
+          .addOption("low", "开启 · 低")
+          .addOption("high", "开启 · 高")
+          .addOption("max", "开启 · 最高")
+          .setValue(this.plugin.settings.aiThinking)
+          .onChange(async (value) => {
+            this.plugin.settings.aiThinking = value === "low"
+              || value === "high"
+              || value === "max"
+              ? value
+              : "off";
+            await this.plugin.saveSettings();
+          }));
+    } else {
+      new Setting(ai)
+        .setName("AI 模型")
+        .setDesc("填写服务商控制台中的模型名称或接入点 ID。")
+        .addText((text) => text
+          .setPlaceholder(
+            this.plugin.settings.aiProvider === "anthropic"
+              ? "例如：Claude 模型名称"
+              : "例如：服务商提供的模型 ID",
+          )
+          .setValue(this.plugin.settings.aiModel)
+          .onChange(async (value) => {
+            this.plugin.settings.aiModel = value.trim();
+            await this.plugin.saveSettings();
+          }));
+    }
 
     if (this.plugin.settings.aiProvider === "custom") {
       new Setting(ai)

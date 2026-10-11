@@ -21,12 +21,11 @@ function recorder(response: AiHttpResponse): {
 }
 
 describe("AI provider requests", () => {
-  it("uses one OpenAI-compatible contract for Ark, OpenAI and DeepSeek", async () => {
+  it("uses one OpenAI-compatible contract for Ark and OpenAI", async () => {
     for (
       const [provider, expectedUrl] of [
         ["ark", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"],
         ["openai", "https://api.openai.com/v1/chat/completions"],
-        ["deepseek", "https://api.deepseek.com/chat/completions"],
       ] as const
     ) {
       const http = recorder({
@@ -60,6 +59,128 @@ describe("AI provider requests", () => {
         stream: false,
       });
     }
+  });
+
+  it("turns DeepSeek thinking off by default and leaves room for long output", async () => {
+    const http = recorder({
+      status: 200,
+      json: { choices: [{ message: { content: "整理结果" } }] },
+      text: "",
+    });
+
+    await requestAiText({
+      provider: "deepseek",
+      apiKey: "deepseek-secret",
+      model: "deepseek-flash",
+      systemPrompt: "只整理，不虚构。",
+      userPrompt: "原始内容",
+    }, http.request);
+
+    expect(http.requests[0]?.url).toBe(
+      "https://api.deepseek.com/chat/completions",
+    );
+    expect(JSON.parse(http.requests[0]?.body ?? "{}")).toEqual({
+      model: "deepseek-flash",
+      messages: [
+        { role: "system", content: "只整理，不虚构。" },
+        { role: "user", content: "原始内容" },
+      ],
+      stream: false,
+      thinking: { type: "disabled" },
+      max_tokens: 32768,
+    });
+  });
+
+  it("sends the selected DeepSeek thinking effort and ignores reasoning text", async () => {
+    const http = recorder({
+      status: 200,
+      json: {
+        choices: [{
+          message: { reasoning_content: "先分析……", content: "最终答案" },
+        }],
+      },
+      text: "",
+    });
+
+    const result = await requestAiText({
+      provider: "deepseek",
+      apiKey: "deepseek-secret",
+      model: "deepseek-v4-pro",
+      thinking: "high",
+      systemPrompt: "系统",
+      userPrompt: "用户",
+    }, http.request);
+
+    expect(result).toBe("最终答案");
+    const body = JSON.parse(http.requests[0]?.body ?? "{}");
+    expect(body.thinking).toEqual({ type: "enabled" });
+    expect(body.reasoning_effort).toBe("high");
+    expect(body).not.toHaveProperty("max_tokens");
+  });
+
+  it("maps retired or empty DeepSeek model names to deepseek-flash", async () => {
+    for (
+      const model of [
+        "",
+        "deepseek-chat",
+        "deepseek-reasoner",
+        "deepseek-v4-flash",
+      ]
+    ) {
+      const http = recorder({
+        status: 200,
+        json: { choices: [{ message: { content: "ok" } }] },
+        text: "",
+      });
+      await requestAiText({
+        provider: "deepseek",
+        apiKey: "deepseek-secret",
+        model,
+        systemPrompt: "系统",
+        userPrompt: "用户",
+      }, http.request);
+      expect(JSON.parse(http.requests[0]?.body ?? "{}").model).toBe(
+        "deepseek-flash",
+      );
+    }
+  });
+
+  it("does not add DeepSeek-only fields to other providers", async () => {
+    const http = recorder({
+      status: 200,
+      json: { choices: [{ message: { content: "ok" } }] },
+      text: "",
+    });
+    await requestAiText({
+      provider: "custom",
+      baseUrl: "https://llm.example.com/v1",
+      apiKey: "secret",
+      model: "deepseek-chat",
+      thinking: "high",
+      systemPrompt: "系统",
+      userPrompt: "用户",
+    }, http.request);
+    const body = JSON.parse(http.requests[0]?.body ?? "{}");
+    expect(body.model).toBe("deepseek-chat");
+    expect(body).not.toHaveProperty("thinking");
+    expect(body).not.toHaveProperty("reasoning_effort");
+    expect(body).not.toHaveProperty("max_tokens");
+  });
+
+  it("explains how to recover when DeepSeek rejects a model name", async () => {
+    const http = recorder({
+      status: 400,
+      json: { error: { message: "Model Not Exist" } },
+      text: "",
+    });
+
+    await expect(requestAiText({
+      provider: "deepseek",
+      apiKey: "deepseek-secret",
+      model: "deepseek-old-model",
+      systemPrompt: "系统",
+      userPrompt: "用户",
+    }, http.request)).rejects.toThrow(/Model Not Exist.*deepseek-flash/);
   });
 
   it("uses the native Anthropic Messages contract for Claude", async () => {

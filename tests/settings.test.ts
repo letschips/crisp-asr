@@ -228,6 +228,38 @@ describe("settings normalization", () => {
     expect(settings).not.toHaveProperty("aiApiKey");
   });
 
+  it("moves retired DeepSeek models to deepseek-flash and keeps reasoner thinking", () => {
+    const chat = normalizeSettings({ aiProvider: "deepseek", aiModel: "deepseek-chat" });
+    expect(chat.aiModel).toBe("deepseek-flash");
+    expect(chat.aiThinking).toBe("off");
+
+    const reasoner = normalizeSettings({
+      aiProvider: "deepseek",
+      aiModel: " deepseek-reasoner ",
+    });
+    expect(reasoner.aiModel).toBe("deepseek-flash");
+    expect(reasoner.aiThinking).toBe("high");
+
+    const explicit = normalizeSettings({
+      aiProvider: "deepseek",
+      aiModel: "deepseek-reasoner",
+      aiThinking: "max",
+    });
+    expect(explicit.aiThinking).toBe("max");
+
+    const gateway = normalizeSettings({
+      aiProvider: "custom",
+      aiModel: "deepseek-chat",
+    });
+    expect(gateway.aiModel).toBe("deepseek-chat");
+  });
+
+  it("defaults DeepSeek thinking to off and rejects unknown levels", () => {
+    expect(DEFAULT_SETTINGS.aiThinking).toBe("off");
+    expect(normalizeSettings({ aiThinking: "ultra" }).aiThinking).toBe("off");
+    expect(normalizeSettings({ aiThinking: "low" }).aiThinking).toBe("low");
+  });
+
   it("falls back from unsupported AI providers and output modes", () => {
     const settings = normalizeSettings({
       aiProvider: "unknown-provider",
