@@ -930,6 +930,8 @@
   min-height: 360px;
   max-height: min(62vh, 680px);
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Bound the row so each column scrolls instead of being clipped. */
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--text-normal) 10%, transparent);
   border-radius: 13px;
@@ -1169,6 +1171,7 @@
   .crisp-asr-smart-preview {
     max-height: none;
     grid-template-columns: 1fr;
+    grid-template-rows: none;
   }
 
   .crisp-asr-smart-preview section {
