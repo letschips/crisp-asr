@@ -503,6 +503,8 @@ export default class CrispAsrPlugin extends Plugin {
     this.readAloudStatusBar = this.addStatusBarItem();
     this.readAloudStatusBar.addClass("crisp-asr-statusbar", "mod-clickable");
     this.readAloudStatusBar.setAttr("aria-label", "点击暂停或继续朗读");
+    // 状态栏贴着窗口底边，提示框默认朝下放不下，会被挤回来盖住状态栏
+    this.readAloudStatusBar.setAttr("data-tooltip-position", "top");
     this.readAloudStatusBar.hide();
     this.registerDomEvent(
       this.readAloudStatusBar,
