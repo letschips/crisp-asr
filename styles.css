@@ -1094,6 +1094,27 @@
   }
 }
 
+.crisp-asr-live-strip__pulse.has-orb {
+  width: 26px;
+  height: 26px;
+  margin: -4px -3px;
+  border-radius: 50%;
+  background: none;
+  box-shadow: none;
+  animation: none;
+}
+
+.crisp-asr-live-strip__orb {
+  display: block;
+  width: 26px;
+  height: 26px;
+  color: #007aff;
+}
+
+.theme-dark .crisp-asr-live-strip__orb {
+  color: #0a84ff;
+}
+
 .crisp-asr-live-strip__status {
   font-weight: 650;
   font-size: var(--font-ui-smaller);

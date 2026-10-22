@@ -1,3 +1,5 @@
+import { CrispAsrLiveOrb } from "./live-orb";
+
 export type LiveStripMode =
   | "idle"
   | "connecting"
@@ -9,6 +11,7 @@ export interface LiveStripState {
   mode: LiveStripMode;
   elapsed: string;
   preview: string;
+  level?: number;
 }
 
 export interface LiveStripActions {
@@ -22,6 +25,7 @@ export class CrispAsrLiveStrip {
   private timer: HTMLElement | null = null;
   private preview: HTMLElement | null = null;
   private stopButton: HTMLButtonElement | null = null;
+  private orb: CrispAsrLiveOrb | null = null;
 
   constructor(
     private readonly document: Document,
@@ -47,6 +51,7 @@ export class CrispAsrLiveStrip {
       : state.mode === "finishing"
         ? "正在收尾"
         : "实时听写中";
+    this.orb?.update(state.mode, state.level ?? 0);
     this.timer.textContent = state.elapsed;
     this.preview.textContent = state.preview || "声音会继续写入当前目标笔记";
     if (this.stopButton) {
@@ -57,6 +62,8 @@ export class CrispAsrLiveStrip {
   }
 
   destroy(): void {
+    this.orb?.destroy();
+    this.orb = null;
     this.root?.remove();
     this.root = null;
     this.status = null;
@@ -105,5 +112,9 @@ export class CrispAsrLiveStrip {
     this.preview = preview;
     this.timer = timer;
     this.stopButton = stop;
+    this.orb = CrispAsrLiveOrb.mount(pulse);
+    if (this.orb) {
+      pulse.classList.add("has-orb");
+    }
   }
 }

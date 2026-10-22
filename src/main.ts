@@ -2451,6 +2451,7 @@ export default class CrispAsrPlugin extends Plugin {
       mode: this.uiState.mode,
       elapsed: this.formatElapsed(),
       preview: this.uiState.preview || latest,
+      level: this.uiState.inputLevel,
     });
     for (const listener of this.listeners) {
       listener();
