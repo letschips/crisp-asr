@@ -116,7 +116,7 @@ export class SmartProcessingModal extends Modal {
     this.contentEl.replaceChildren();
     const hint = document.createElement("p");
     hint.className = "crisp-asr-smart-preview__hint";
-    hint.textContent = "写入前请核对结果。原始转写不会被覆盖。";
+    hint.textContent = "原始转写不会被覆盖";
     const preview = document.createElement("div");
     preview.className = "crisp-asr-smart-preview";
     const original = document.createElement("section");

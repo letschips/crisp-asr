@@ -324,9 +324,7 @@ export class CrispAsrView extends ItemView {
     const heading = document.createElement("div");
     const title = document.createElement("h2");
     title.textContent = "Crisp ASR";
-    const subtitle = document.createElement("p");
-    subtitle.textContent = "把声音安静地落进笔记";
-    heading.append(title, subtitle);
+    heading.append(title);
     identity.append(mark, heading);
     const badge = document.createElement("span");
     badge.className = `crisp-asr-status is-${state.mode}`;
@@ -588,11 +586,6 @@ export class CrispAsrView extends ItemView {
         ? basename(state.smartTargetPath)
         : "打开一篇转写笔记";
     smartHeading.append(smartTitle, smartTarget);
-    const smartDescription = document.createElement("p");
-    smartDescription.className = "crisp-asr-smart__description";
-    smartDescription.textContent = state.smartTargetPath
-      ? "手动调用所选 AI；写入前可预览，原始转写不会被覆盖。"
-      : "完成一次转写，或打开已有的 Crisp ASR 转写笔记。";
     const smartActions = document.createElement("div");
     smartActions.className = "crisp-asr-smart-actions";
     const smartDisabled = !state.smartTargetPath
@@ -629,7 +622,7 @@ export class CrispAsrView extends ItemView {
       () => void this.plugin.startSmartProcessing("custom"),
       smartDisabled,
     );
-    smart.append(smartHeading, smartDescription, smartActions);
+    smart.append(smartHeading, smartActions);
 
     const readAloud = document.createElement("section");
     readAloud.className = "crisp-asr-card crisp-asr-read-aloud";

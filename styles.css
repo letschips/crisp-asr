@@ -42,8 +42,7 @@
   gap: 11px;
 }
 
-.crisp-asr-identity h2,
-.crisp-asr-identity p {
+.crisp-asr-identity h2 {
   margin: 0;
 }
 
@@ -51,12 +50,6 @@
   font-weight: 680;
   font-size: 17px;
   letter-spacing: -0.02em;
-}
-
-.crisp-asr-identity p {
-  margin-top: 2px;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
 }
 
 .crisp-asr-mark {
@@ -509,13 +502,6 @@
 @keyframes crisp-asr-pulse {
   from { opacity: 0.28; }
   to { opacity: 1; }
-}
-
-.crisp-asr-smart__description {
-  margin: -2px 14px 11px;
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.5;
 }
 
 .crisp-asr-smart-actions {

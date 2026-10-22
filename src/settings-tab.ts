@@ -36,9 +36,12 @@ function createSettingGroup(
   const info = document.createElement("span");
   const heading = document.createElement("strong");
   heading.textContent = title;
-  const copy = document.createElement("span");
-  copy.textContent = description;
-  info.append(heading, copy);
+  info.append(heading);
+  if (description) {
+    const copy = document.createElement("span");
+    copy.textContent = description;
+    info.append(copy);
+  }
   const chevron = document.createElement("i");
   summary.append(info, chevron);
   const content = document.createElement("div");
@@ -59,17 +62,14 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     containerEl.addClass("crisp-asr-settings");
     const intro = containerEl.createDiv({ cls: "crisp-asr-settings__intro" });
     intro.createEl("h2", { text: "Crisp ASR" });
-    intro.createEl("p", {
-      text: "连接豆包或 Gemini，把录音和实时声音直接沉淀为 Markdown。",
-    });
 
     // -----------------------------------------------------------------
     // 1. 软件授权组 (提升至最顶部)
     // -----------------------------------------------------------------
     const licenseGroup = createSettingGroup(
       containerEl,
-      "软件授权 (必填)",
-      "纯离线 Ed25519 密钥激活验证",
+      "软件授权",
+      "",
       true,
     );
 
@@ -78,10 +78,15 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       .setDesc("正在验证授权状态...");
 
     let isActivated = false;
+    // 授权是异步验证的：先按未激活渲染，验证通过后再把这些说明改成激活后的文案。
+    const lockedSettings: Array<[Setting, string]> = [];
+    const lockable = (setting: Setting, activatedDesc: string): Setting => {
+      lockedSettings.push([setting, activatedDesc]);
+      return setting.setDesc(isActivated ? activatedDesc : "🔒 先激活 Crisp ASR");
+    };
 
     new Setting(licenseGroup)
       .setName("输入授权码")
-      .setDesc("粘贴购买获取的授权字符串进行离线激活。")
       .addText((text) => text
         .setPlaceholder("粘贴授权码字符串...")
         .setValue(this.plugin.settings.licenseCode)
@@ -107,6 +112,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       void verifyLicenseCode(this.plugin.settings.licenseCode).then((verifyRes) => {
         if (verifyRes.valid && verifyRes.payload) {
           isActivated = true;
+          for (const [setting, desc] of lockedSettings) setting.setDesc(desc);
           statusSetting.setDesc(
             `✅ 已激活（授权给: ${verifyRes.payload.userName}，到期时间: ${verifyRes.payload.expiresAt.split("T")[0]}）`,
           );
@@ -117,7 +123,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
         }
       });
     } else {
-      statusSetting.setDesc("❌ 未激活（尚未输入授权码，请先在此激活）");
+      statusSetting.setDesc("❌ 未激活");
     }
 
     // -----------------------------------------------------------------
@@ -126,13 +132,12 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const engineGroup = createSettingGroup(
       containerEl,
       "语音识别引擎",
-      "选择用于实时听写与录音文件转写的底层 STT 服务",
+      "",
       true,
     );
 
     new Setting(engineGroup)
       .setName("当前引擎")
-      .setDesc("支持火山引擎豆包或 Google Gemini 3.5 Transcribe。")
       .addDropdown((dropdown) => dropdown
         .addOption("doubao", "火山引擎 · 豆包 ASR")
         .addOption("gemini", "Google · Gemini 3.5 Transcribe")
@@ -150,17 +155,11 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       const geminiGroup = createSettingGroup(
         containerEl,
         "Gemini 3.5 Transcribe 连接与配置",
-        "文件最长 1 小时（说话人或词级时间戳最长 30 分钟）；实时单次会话最多 10 分钟，断线后自动重连",
+        "文件最长 1 小时，带说话人或时间戳 30 分钟；实时单次最多 10 分钟",
         true,
       );
 
-      new Setting(geminiGroup)
-        .setName("Gemini API Key")
-        .setDesc(
-          isActivated
-            ? "选择已有 Secret，或创建一个新的 Google Gemini API Key。"
-            : "🔒 必须先在上方【软件授权】中激活 Crisp ASR 后才能配置 API Key。"
-        )
+      lockable(new Setting(geminiGroup).setName("Gemini API Key"), "")
         .addComponent((container) =>
           new SecretComponent(this.app, container)
             .setValue(this.plugin.settings.geminiApiKeySecretName)
@@ -179,7 +178,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
       new Setting(geminiGroup)
         .setName("转写模式")
-        .setDesc("Smart 自动去口头语并排版；Verbatim 忠实保留原始字词，并可选说话人或词级时间戳。")
+        .setDesc("Smart 去口头语并排版；Verbatim 保留原字词")
         .addDropdown((dropdown) => dropdown
           .addOption("smart", "智能转写 (Smart · 自动修剪与排版)")
           .addOption("verbatim", "原始逐字 (Verbatim · 逐字稿与时间戳)")
@@ -197,7 +196,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
         .setDesc(
           isSmart
             ? "⚠️ Smart 模式下已自动禁用（Google 官方规则：Smart 模式与说话人分离互斥）"
-            : "在文件转写中自动识别并标注不同发言者 (Speaker 1, 2...)"
+            : ""
         )
         .addToggle((toggle) => toggle
           .setValue(!isSmart && this.plugin.settings.geminiIdentifySpeakers)
@@ -215,7 +214,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
         .setDesc(
           isSmart
             ? "⚠️ Smart 模式下已自动禁用（Google 官方规则：Smart 模式与词级时间戳互斥）"
-            : "为转写文本生成精确词级起止时间戳"
+            : ""
         )
         .addToggle((toggle) => toggle
           .setValue(!isSmart && this.plugin.settings.geminiWordTimestamps)
@@ -230,7 +229,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
       new Setting(geminiGroup)
         .setName("Gemini 专属自定义词汇")
-        .setDesc("可选：每行或逗号分隔专有名词（最多 1,000 条，建议不超过 100 条）。留空时自动复用下方的本地术语库。")
+        .setDesc("每行或逗号分隔，建议不超过 100 条；留空复用本地术语库")
         .addTextArea((text) => text
           .setPlaceholder("Obsidian\nClaude\n产品名称\n人名")
           .setValue(this.plugin.settings.geminiCustomVocabulary)
@@ -241,7 +240,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
       new Setting(geminiGroup)
         .setName("测试 Gemini 连接")
-        .setDesc("验证 API Key 是否能访问 Gemini 3.5 Transcribe 模型信息；不消耗转写额度。")
+        .setDesc("不消耗转写额度")
         .addButton((button) => button
           .setButtonText("开始测试")
           .onClick(async () => {
@@ -259,17 +258,11 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       const connection = createSettingGroup(
         containerEl,
         "豆包连接",
-        "API Key 由 Obsidian SecretStorage 安全保存",
+        "",
         true,
       );
 
-      new Setting(connection)
-        .setName("API Key")
-        .setDesc(
-          isActivated
-            ? "选择已有 Secret，或创建一个新的豆包语音 API Key。"
-            : "🔒 必须先在上方【软件授权】中激活 Crisp ASR 后才能配置 API Key。"
-        )
+      lockable(new Setting(connection).setName("API Key"), "")
         .addComponent((container) =>
           new SecretComponent(this.app, container)
             .setValue(this.plugin.settings.apiKeySecretName)
@@ -288,7 +281,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
       new Setting(connection)
         .setName("实时识别资源")
-        .setDesc("默认使用豆包流式语音识别模型 2.0 小时版。")
         .addText((text) => text
           .setPlaceholder("volc.seedasr.sauc.duration")
           .setValue(this.plugin.settings.liveResourceId)
@@ -300,7 +292,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
       new Setting(connection)
         .setName("测试连接")
-        .setDesc("发送 0.1 秒静音样本，验证 API Key 与极速识别服务。")
         .addButton((button) => button
           .setButtonText("开始测试")
           .onClick(async () => {
@@ -318,13 +309,12 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       "口述场景与识别增强",
       this.plugin.settings.sttEngine === "gemini"
         ? "术语用于 Gemini 识别，场景用于后续创作"
-        : "用场景、术语和当前笔记上下文提高识别与后续创作质量",
+        : "",
       true,
     );
 
     new Setting(recognition)
       .setName("默认口述场景")
-      .setDesc("面板中也可在每次开始前切换。")
       .addDropdown((dropdown) => {
         for (const profile of DICTATION_PROFILES) dropdown.addOption(profile.id, `${profile.name} · ${profile.description}`);
         dropdown.setValue(this.plugin.settings.dictationProfileId);
@@ -341,7 +331,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       new Setting(recognition).setName("场景上下文").setDesc(
         this.plugin.settings.sttEngine === "gemini"
           ? "用于分阶段创作；Gemini 识别只读取术语库。"
-          : "帮助 ASR 理解正在谈论的主题。",
+          : "",
       )
         .addTextArea((text) => text.setValue(this.plugin.settings.customProfileContext).onChange(async (value) => {
           this.plugin.settings.customProfileContext = value.trim(); await this.plugin.saveSettings();
@@ -352,20 +342,20 @@ export class CrispAsrSettingTab extends PluginSettingTab {
         }));
     }
 
-    new Setting(recognition).setName("本地术语库").setDesc("每行或逗号分隔一个人名、品牌名或专业术语。")
+    new Setting(recognition).setName("本地术语库").setDesc("每行或逗号分隔")
       .addTextArea((text) => text.setPlaceholder("Crisp ASR\nWireless Mic RX").setValue(this.plugin.settings.hotwordsText).onChange(async (value) => {
         this.plugin.settings.hotwordsText = value.trim(); await this.plugin.saveSettings();
       }));
     if (this.plugin.settings.sttEngine !== "gemini") {
-      new Setting(recognition).setName("火山热词 ID").setDesc("可选：填写控制台中创建的 boosting table ID。")
+      new Setting(recognition).setName("火山热词 ID").setDesc("控制台里的 boosting table ID")
         .addText((text) => text.setValue(this.plugin.settings.boostingTableId).onChange(async (value) => {
           this.plugin.settings.boostingTableId = value.trim(); await this.plugin.saveSettings();
         }));
-      new Setting(recognition).setName("使用当前笔记上下文").setDesc("开始听写时读取目标笔记标题和开头内容，用于识别上下文；默认关闭。")
+      new Setting(recognition).setName("使用当前笔记上下文").setDesc("读取笔记标题和开头内容")
         .addToggle((toggle) => toggle.setValue(this.plugin.settings.useActiveNoteContext).onChange(async (value) => {
           this.plugin.settings.useActiveNoteContext = value; await this.plugin.saveSettings();
         }));
-      new Setting(recognition).setName("多人说话人分离").setDesc("文件转写优先使用；实时识别是否返回说话人取决于豆包资源能力。")
+      new Setting(recognition).setName("多人说话人分离").setDesc("实时识别要看豆包资源是否支持")
         .addToggle((toggle) => toggle.setValue(this.plugin.settings.identifySpeakers).onChange(async (value) => {
           this.plugin.settings.identifySpeakers = value; await this.plugin.saveSettings();
         }));
@@ -377,12 +367,12 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const ai = createSettingGroup(
       containerEl,
       "AI 文本处理",
-      "转写完成后手动润色、提炼或执行自定义 Prompt",
+      "",
       true,
     );
     new Setting(ai)
       .setName("AI 服务商")
-      .setDesc("这里只控制转写后的文字处理，不会改变上方选择的语音识别引擎。")
+      .setDesc("只用于转写后的文字处理")
       .addDropdown((dropdown) => dropdown
         .addOption("ark", "火山方舟")
         .addOption("openai", "OpenAI")
@@ -413,13 +403,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
           this.display();
         }));
 
-    new Setting(ai)
-      .setName("AI API Key")
-      .setDesc(
-        isActivated
-          ? "与语音识别 Key 分开，由 Obsidian SecretStorage 安全保存。"
-          : "🔒 必须先在上方【软件授权】中激活 Crisp ASR 后才能配置 AI API Key。"
-      )
+    lockable(new Setting(ai).setName("AI API Key"), "与语音识别 Key 分开")
       .addComponent((container) =>
         new SecretComponent(this.app, container)
           .setValue(this.plugin.settings.aiApiKeySecretName)
@@ -442,7 +426,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     if (this.plugin.settings.aiProvider === "deepseek") {
       const modelSetting = new Setting(ai)
         .setName("AI 模型")
-        .setDesc("deepseek-chat、deepseek-reasoner 已停用，旧设置会自动改用 deepseek-flash。")
         .addDropdown((dropdown) => {
           for (const [id, label] of DEEPSEEK_MODELS) {
             dropdown.addOption(id, label);
@@ -467,7 +450,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
       }
       new Setting(ai)
         .setName("思考模式")
-        .setDesc("润色和提炼一般不需要思考；开启后更慢、费用更高。")
+        .setDesc("开启后更慢、费用更高")
         .addDropdown((dropdown) => dropdown
           .addOption("off", "关闭（推荐）")
           .addOption("low", "开启 · 低")
@@ -485,7 +468,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     } else {
       new Setting(ai)
         .setName("AI 模型")
-        .setDesc("填写服务商控制台中的模型名称或接入点 ID。")
+        .setDesc("模型名称或接入点 ID")
         .addText((text) => text
           .setPlaceholder(
             this.plugin.settings.aiProvider === "anthropic"
@@ -502,7 +485,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     if (this.plugin.settings.aiProvider === "custom") {
       new Setting(ai)
         .setName("Base URL")
-        .setDesc("填写 OpenAI Chat Completions 兼容服务的 API 根地址。")
+        .setDesc("OpenAI Chat Completions 兼容的根地址")
         .addText((text) => text
           .setPlaceholder("https://llm.example.com/v1")
           .setValue(this.plugin.settings.aiBaseUrl)
@@ -517,7 +500,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(ai)
       .setName("结果写入方式")
-      .setDesc("默认插入当前转写笔记；原始转写始终保留。")
+      .setDesc("原始转写始终保留")
       .addDropdown((dropdown) => dropdown
         .addOption("same-note", "写入当前转写笔记")
         .addOption("new-note", "创建独立智能整理笔记")
@@ -549,7 +532,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(ai)
       .setName("测试 AI 连接")
-      .setDesc("发送一条极短文本，验证 API Key、模型和接口配置。")
       .addButton((button) => button
         .setButtonText("开始测试")
         .onClick(async () => {
@@ -567,13 +549,13 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const tts = createSettingGroup(
       containerEl,
       "朗读",
-      "用 Gemini 3.8 TTS 朗读选中文本或当前笔记，与 Gemini 转写共用 API Key",
+      "",
       false,
     );
 
     new Setting(tts)
       .setName("Gemini API Key")
-      .setDesc("与 Gemini 3.5 Transcribe 共用同一个 Secret；使用豆包转写时也可以单独在这里选择。")
+      .setDesc("与 Gemini 转写共用")
       .addComponent((container) =>
         new SecretComponent(this.app, container)
           .setValue(this.plugin.settings.geminiApiKeySecretName)
@@ -592,7 +574,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(tts)
       .setName("朗读模型")
-      .setDesc("Flash-Lite 更快更省，适合日常朗读；Flash 音质和表现力更好。")
+      .setDesc("Flash-Lite 更快更省，Flash 音质更好")
       .addDropdown((dropdown) => {
         for (const [id, label] of GEMINI_TTS_MODELS) dropdown.addOption(id, label);
         dropdown
@@ -605,7 +587,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(tts)
       .setName("音色")
-      .setDesc("30 个官方预置音色，都能读中文。")
       .addDropdown((dropdown) => {
         for (const [id, tone] of GEMINI_TTS_VOICES) dropdown.addOption(id, `${id} · ${tone}`);
         dropdown
@@ -618,9 +599,9 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(tts)
       .setName("朗读风格")
-      .setDesc("可选。一句简短描述，例如“语速稍慢，平静”。留空效果通常最稳定。")
+      .setDesc("留空最稳定")
       .addText((text) => text
-        .setPlaceholder("留空")
+        .setPlaceholder("例如：语速稍慢，平静")
         .setValue(this.plugin.settings.ttsStyle)
         .onChange(async (value) => {
           this.plugin.settings.ttsStyle = value.trim();
@@ -629,7 +610,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(tts)
       .setName("试听")
-      .setDesc("用当前模型、音色和风格读一句示例；会消耗少量额度。")
+      .setDesc("会消耗少量额度")
       .addButton((button) => button
         .setButtonText("试听")
         .onClick(async () => {
@@ -642,21 +623,19 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const live = createSettingGroup(
       containerEl,
       "实时输入",
-      "选择麦克风与可选原始音频保存",
+      "",
       true,
     );
 
     new Setting(live)
       .setName("默认声音来源")
       .setDesc(
-        "仅支持麦克风。Obsidian 不支持直接捕获系统声音；"
-        + "如需转写浏览器或 App 播放的声音，可用虚拟声卡（如 BlackHole）"
-        + "把系统输出路由到麦克风后选择对应设备。",
+        "仅支持麦克风；系统声音可用虚拟声卡（如 BlackHole）转成麦克风",
       );
 
     new Setting(live)
       .setName("首选麦克风")
-      .setDesc("设备不可用时自动退回系统默认麦克风。")
+      .setDesc("不可用时退回系统默认")
       .addDropdown((dropdown) => {
         for (const mic of this.plugin.uiState.microphones) {
           dropdown.addOption(mic.deviceId, mic.label);
@@ -676,7 +655,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(live)
       .setName("保存实时原始音频")
-      .setDesc("默认关闭；开启后保存实际发送给 ASR 的混合声音。")
       .addToggle((toggle) => toggle
         .setValue(this.plugin.settings.saveLiveAudio)
         .onChange(async (value) => {
@@ -685,7 +663,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     const silenceDuration = new Setting(live)
       .setName("静音持续时间")
-      .setDesc("连续低音量达到该时长后触发静音保护。")
       .addDropdown((dropdown) => dropdown
         .addOption("30", "30 秒")
         .addOption("60", "60 秒")
@@ -708,7 +685,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(live)
       .setName("静音保护")
-      .setDesc("默认只提醒，不会因为停顿而擅自结束听写。")
       .addDropdown((dropdown) => dropdown
         .addOption("warn", "仅提醒")
         .addOption("stop", "自动结束并写入")
@@ -725,7 +701,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(live)
       .setName("实时录音目录")
-      .setDesc("使用 WebM/Opus，路径相对于当前 Vault。")
       .addText((text) => text
         .setPlaceholder("Crisp ASR/Audio")
         .setValue(this.plugin.settings.liveAudioFolder)
@@ -741,13 +716,12 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const workflow = createSettingGroup(
       containerEl,
       "转写工作流",
-      "控制内置录音监听和 Markdown 去向",
+      "",
       true,
     );
 
     new Setting(workflow)
       .setName("自动转写新录音")
-      .setDesc("新的音频文件落入 Obsidian 后自动加入转写队列。")
       .addToggle((toggle) => toggle
         .setValue(this.plugin.settings.autoTranscribeRecordings)
         .onChange(async (value) => {
@@ -757,7 +731,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(workflow)
       .setName("自动转写范围")
-      .setDesc("选择哪些新音频文件会自动转写。")
       .addDropdown((dropdown) => dropdown
         .addOption("recording", "仅 Obsidian 录音机命名")
         .addOption("folder", "指定文件夹")
@@ -772,7 +745,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     const folderSetting = new Setting(workflow)
       .setName("监听文件夹")
-      .setDesc("范围选择「指定文件夹」时生效；留空则不会自动转写。")
+      .setDesc("留空则不自动转写")
       .addText((text) => text
         .setPlaceholder("录音")
         .setValue(this.plugin.settings.autoTranscribeFolder)
@@ -793,7 +766,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(workflow)
       .setName("输出方式")
-      .setDesc("独立笔记更安全；追加模式写入启动任务时的活动笔记。")
+      .setDesc("追加模式写入开始时的活动笔记")
       .addDropdown((dropdown) => dropdown
         .addOption("sidecar", "创建独立转写笔记")
         .addOption("current-note", "追加到当前笔记")
@@ -807,7 +780,6 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
     new Setting(workflow)
       .setName("转写笔记目录")
-      .setDesc("独立转写笔记的 Vault 相对路径。")
       .addText((text) => text
         .setPlaceholder("Crisp ASR")
         .setValue(this.plugin.settings.outputFolder)
@@ -819,7 +791,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const shortcutSetting = new Setting(workflow)
       .setName("获取 iPhone 快捷指令")
       .setDesc(
-        "用 iPhone 相机扫描二维码（或点击二维码打开链接）即可添加「Crisp 录音」快捷指令。添加后把「存储文件」位置改成你自己的 Obsidian 库（iCloud Drive > Obsidian > 你的库 > 录音），详见插件文档。",
+        "扫码添加后，把「存储文件」位置改成你的库 > 录音",
       );
     const shortcutLink = shortcutSetting.controlEl.createEl("a", {
       href: CRISP_SHORTCUT_URL,

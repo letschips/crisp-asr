@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { verifyLicenseCode } from "../src/license";
 import { CrispAsrSettingTab } from "../src/settings-tab";
+
+vi.mock("../src/license", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/license")>()),
+  verifyLicenseCode: vi.fn(),
+}));
 
 function installObsidianElementHelpers(): void {
   const prototype = HTMLElement.prototype as unknown as Record<
@@ -234,7 +240,6 @@ describe("AI text processing settings", () => {
 
     tab.display();
 
-    expect(tab.containerEl.textContent).toContain("豆包或 Gemini");
     expect(tab.containerEl.textContent).toContain("Gemini 3.5 Transcribe 连接与配置");
     expect(tab.containerEl.textContent).toContain("最多 10 分钟");
     expect(tab.containerEl.textContent).toContain("30 分钟");
@@ -244,5 +249,31 @@ describe("AI text processing settings", () => {
     expect(tab.containerEl.querySelectorAll<HTMLInputElement>(
       'input[type="checkbox"]:disabled',
     )).toHaveLength(2);
+  });
+});
+
+describe("license-gated key settings", () => {
+  beforeEach(() => {
+    installObsidianElementHelpers();
+    document.body.replaceChildren();
+  });
+
+  it("drops the locked note once the license verifies", async () => {
+    vi.mocked(verifyLicenseCode).mockResolvedValue({
+      valid: true,
+      payload: { userName: "Tester", expiresAt: "2126-01-01T00:00:00Z" },
+    } as never);
+    const licensed = plugin();
+    (licensed.settings as Record<string, unknown>).licenseCode = "code";
+    const tab = new CrispAsrSettingTab({} as never, licensed as never);
+
+    tab.display();
+    expect(tab.containerEl.textContent).toContain("先激活 Crisp ASR");
+    await vi.waitFor(() => {
+      expect(tab.containerEl.textContent).toContain("已激活");
+    });
+
+    expect(tab.containerEl.textContent).not.toContain("先激活 Crisp ASR");
+    expect(tab.containerEl.textContent).toContain("与语音识别 Key 分开");
   });
 });
