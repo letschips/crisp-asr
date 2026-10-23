@@ -1095,19 +1095,25 @@
 }
 
 .crisp-asr-live-strip__pulse.has-orb {
-  width: 26px;
-  height: 26px;
-  margin: -4px -3px;
+  --crisp-asr-orb-size: 32px;
+  width: var(--crisp-asr-orb-size);
+  height: var(--crisp-asr-orb-size);
+  margin: -6px -4px;
   border-radius: 50%;
   background: none;
   box-shadow: none;
   animation: none;
 }
 
+.is-mobile .crisp-asr-live-strip__pulse.has-orb {
+  --crisp-asr-orb-size: 36px;
+  margin: -8px -5px;
+}
+
 .crisp-asr-live-strip__orb {
   display: block;
-  width: 26px;
-  height: 26px;
+  width: var(--crisp-asr-orb-size);
+  height: var(--crisp-asr-orb-size);
   color: #007aff;
 }
 

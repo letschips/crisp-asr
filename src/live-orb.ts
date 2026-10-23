@@ -1,4 +1,5 @@
 import type { LiveStripMode } from "./live-strip";
+import { InputLevelNormalizer } from "./live-orb-level";
 
 const VERTEX_SHADER = `
 attribute vec2 aPosition;
@@ -72,7 +73,8 @@ void main() {
 }
 `;
 
-const ORB_SIZE = 26;
+// Fallback when layout has no size yet; CSS sets the real one per platform.
+const ORB_SIZE = 32;
 
 interface OrbTargets {
   mono: number;
@@ -116,6 +118,7 @@ export class CrispAsrLiveOrb {
   private time = Math.random() * 40;
   private level = 0;
   private targetLevel = 0;
+  private readonly normalizer = new InputLevelNormalizer();
   private mono = 1;
   private gather = 0;
   private targets: OrbTargets = targetsFor("connecting");
@@ -135,15 +138,23 @@ export class CrispAsrLiveOrb {
     canvas.className = "crisp-asr-live-strip__orb";
     canvas.setAttribute("aria-hidden", "true");
     const orb = new CrispAsrLiveOrb(canvas);
-    if (!orb.init()) return null;
+    // Attach first so the backing store can match the CSS size.
     host.append(canvas);
+    if (!orb.init()) {
+      canvas.remove();
+      return null;
+    }
     host.ownerDocument.addEventListener("visibilitychange", orb.onVisibility);
     return orb;
   }
 
   update(mode: LiveStripMode, level: number): void {
     this.targets = targetsFor(mode);
-    this.targetLevel = mode === "listening" ? Math.max(0, Math.min(1, level)) : 0;
+    const normalized = this.normalizer.push(
+      level,
+      this.view?.performance.now() ?? Date.now(),
+    );
+    this.targetLevel = mode === "listening" ? normalized : 0;
     this.readColor();
     this.start();
   }
@@ -197,8 +208,9 @@ export class CrispAsrLiveOrb {
       this.uniforms[name] = gl.getUniformLocation(program, name);
     }
     const ratio = Math.min(2, this.view?.devicePixelRatio || 1);
-    this.canvas.width = Math.round(ORB_SIZE * ratio);
-    this.canvas.height = Math.round(ORB_SIZE * ratio);
+    const size = this.canvas.clientWidth || ORB_SIZE;
+    this.canvas.width = Math.round(size * ratio);
+    this.canvas.height = Math.round(size * ratio);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(0, 0, 0, 0);
     this.gl = gl;
