@@ -127,4 +127,14 @@ describe("Pulse memo dictation", () => {
     expect(s.done[0].error).toMatch(/连接已断开/);
     expect(writes).toEqual([]);
   });
+
+  it("refuses to start over an unrecovered draft, from Pulse or the panel, and keeps it", async () => {
+    const { plugin } = makePlugin();
+    const draft = { id: "old", startedAt: "2026-10-22T00:00:00Z", targetPath: null, utterances: [{ text: "旧的未恢复文字", definite: true, start_time: 0, end_time: 1 }], preview: "", markers: [], updatedAt: 1 };
+    plugin.settings.liveDraft = draft as never;
+    await expect(plugin.startMemoDictation(sink())).rejects.toThrow(/恢复或丢弃/);
+    await plugin.startLiveTranscription();
+    expect(clients).toHaveLength(0);
+    expect(plugin.settings.liveDraft).toEqual(draft);
+  });
 });

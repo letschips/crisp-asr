@@ -426,4 +426,70 @@ describe("Pulse memo state notifications", () => {
     internals.handleQueueChange([{ id: "j1", sourcePath: "a.webm", memoId: "m1", status: "queued", attempt: 0, createdAt: 1, updatedAt: 1 }]);
     expect(triggered.filter((name) => name === "crisp-asr:state")).toHaveLength(1);
   });
+
+  it("does not resurrect a job whose enqueue could not be saved", async () => {
+    const files = new Map<string, string>();
+    const app = createApp();
+    (app.vault as Record<string, unknown>).adapter = {
+      exists: async (path: string) => files.has(path),
+      read: async (path: string) => {
+        const value = files.get(path);
+        if (value === undefined) throw new Error("ENOENT");
+        return value;
+      },
+      copy: async () => undefined,
+    };
+    const plugin = new CrispAsrPlugin(
+      app as never,
+      { id: "crisp-asr", dir: "plugins/crisp-asr" } as never,
+    );
+    plugin.loadData = async () => null;
+    const goodSave = async (value: unknown) => {
+      files.set("plugins/crisp-asr/data.json", JSON.stringify(value));
+    };
+    plugin.saveData = goodSave;
+    await plugin.onload();
+    const queue = (plugin as unknown as {
+      fileQueue: { enqueue: (path: string) => Promise<unknown>; jobs: () => unknown[] };
+    }).fileQueue;
+
+    plugin.saveData = async () => undefined;
+    await expect(queue.enqueue("Audio/a.m4a")).rejects.toThrow(/保存失败/);
+    expect(queue.jobs()).toHaveLength(0);
+    expect(plugin.settings.fileJobs).toHaveLength(0);
+
+    plugin.saveData = goodSave;
+    await plugin.saveSettings();
+    expect(JSON.parse(files.get("plugins/crisp-asr/data.json")!).fileJobs).toEqual([]);
+    await plugin.onunload();
+  });
+
+  it("keeps a saved transcript as the result when opening it fails", async () => {
+    const app = createApp();
+    const created: TFile[] = [];
+    Object.assign(app.vault as Record<string, unknown>, {
+      getAbstractFileByPath: (path: string) => created.find((file) => file.path === path) ?? null,
+      createFolder: async () => undefined,
+      create: async (path: string) => {
+        const file = Object.assign(new TFile(), { path, basename: "a 转写", extension: "md" });
+        created.push(file);
+        return file;
+      },
+    });
+    (app.workspace as Record<string, unknown>).getLeaf = () => ({
+      openFile: async () => {
+        throw new Error("leaf closed");
+      },
+    });
+    const plugin = new CrispAsrPlugin(app as never, { id: "crisp-asr" } as never);
+    const source = Object.assign(new TFile(), { path: "Audio/a.m4a", basename: "a", extension: "m4a" });
+    const internal = plugin as unknown as {
+      writeFileTranscript: (source: TFile, target: undefined, result: { text: string; utterances: [] }) => Promise<TFile>;
+    };
+
+    const output = await internal.writeFileTranscript(source, undefined, { text: "识别结果", utterances: [] });
+
+    expect(created).toHaveLength(1);
+    expect(output.path).toBe(created[0].path);
+  });
 });

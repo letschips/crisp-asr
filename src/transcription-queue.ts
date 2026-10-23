@@ -83,6 +83,8 @@ export class TranscriptionQueue {
   private storedJobs: PersistedFileJob[];
   private started = false;
   private recovered = false;
+  // Set when the queue could not save a job's progress; cleared by the next successful save or start().
+  private stalled = false;
   private drainPromise: Promise<void> | null = null;
 
   constructor(
@@ -131,6 +133,7 @@ export class TranscriptionQueue {
 
   async start(): Promise<void> {
     this.started = true;
+    this.stalled = false;
     if (!this.recovered) {
       this.recovered = true;
       const before = JSON.stringify(this.storedJobs);
@@ -200,13 +203,15 @@ export class TranscriptionQueue {
   }
 
   private kick(): void {
-    if (!this.started || this.drainPromise) {
+    if (!this.started || this.stalled || this.drainPromise) {
       return;
     }
     if (!this.storedJobs.some((job) => job.status === "queued")) {
       return;
     }
-    this.drainPromise = this.drain().finally(() => {
+    this.drainPromise = this.drain().catch((error: unknown) => {
+      console.error("Crisp ASR: transcription queue stopped", error);
+    }).finally(() => {
       this.drainPromise = null;
       this.kick();
     });
@@ -222,23 +227,20 @@ export class TranscriptionQueue {
       entry.attempt += 1;
       entry.updatedAt = this.now();
       delete entry.nextAttemptAt;
-      await this.commit();
+      if (!(await this.tryCommit())) {
+        this.failUnsaved(entry);
+        return;
+      }
 
       entry.status = "transcribing";
       entry.updatedAt = this.now();
-      await this.commit();
+      if (!(await this.tryCommit())) {
+        this.failUnsaved(entry);
+        return;
+      }
+      let result: FileJobRunResult;
       try {
-        const result = await this.dependencies.run(cloneJob(entry));
-        entry.status = "completed";
-        entry.updatedAt = this.now();
-        delete entry.lastError;
-        delete entry.nextAttemptAt;
-        if (result.outputPath) {
-          entry.outputPath = result.outputPath;
-        } else {
-          delete entry.outputPath;
-        }
-        await this.commit();
+        result = await this.dependencies.run(cloneJob(entry));
       } catch (error) {
         entry.lastError = errorMessage(error);
         entry.updatedAt = this.now();
@@ -247,7 +249,7 @@ export class TranscriptionQueue {
             ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1];
           entry.status = "retry-wait";
           entry.nextAttemptAt = this.now() + delayMs;
-          await this.commit();
+          await this.tryCommit();
           await (this.dependencies.delay ?? defaultDelay)(delayMs);
           if (!this.started) {
             return;
@@ -255,13 +257,48 @@ export class TranscriptionQueue {
           entry.status = "queued";
           entry.updatedAt = this.now();
           delete entry.nextAttemptAt;
-          await this.commit();
+          await this.tryCommit();
         } else {
           entry.status = "failed";
           delete entry.nextAttemptAt;
-          await this.commit();
+          await this.tryCommit();
         }
+        continue;
       }
+      // The output already exists, so a failed save of "completed" must not turn into a failed (re-runnable) job.
+      entry.status = "completed";
+      entry.updatedAt = this.now();
+      delete entry.lastError;
+      delete entry.nextAttemptAt;
+      if (result.outputPath) {
+        entry.outputPath = result.outputPath;
+      } else {
+        delete entry.outputPath;
+      }
+      await this.tryCommit();
+    }
+  }
+
+  /** Nothing has run yet: park the job as failed so it can be retried or removed, and pause the queue. */
+  private failUnsaved(entry: PersistedFileJob): void {
+    entry.status = "failed";
+    entry.lastError = "转写队列保存失败，请重试";
+    entry.updatedAt = this.now();
+    this.stalled = true;
+    this.dependencies.onChange?.(this.jobs());
+  }
+
+  /**
+   * Commits, but keeps (and still reports) the in-memory state when the save fails, so the next
+   * successful save writes it; returns whether it was saved.
+   */
+  private async tryCommit(): Promise<boolean> {
+    try {
+      await this.commit();
+      return true;
+    } catch {
+      this.dependencies.onChange?.(this.jobs());
+      return false;
     }
   }
 
@@ -269,6 +306,7 @@ export class TranscriptionQueue {
     this.storedJobs = pruneFileJobs(this.storedJobs);
     const snapshot = this.jobs();
     await this.dependencies.persist(snapshot);
+    this.stalled = false;
     this.dependencies.onChange?.(snapshot);
   }
 }

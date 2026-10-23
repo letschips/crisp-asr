@@ -114,7 +114,11 @@ export class CrispAsrLiveStrip {
     this.stopButton = stop;
     // The orb sizes its canvas from layout, so the class goes on first.
     pulse.classList.add("has-orb");
-    this.orb = CrispAsrLiveOrb.mount(pulse);
+    const orb = CrispAsrLiveOrb.mount(pulse, () => {
+      pulse.classList.remove("has-orb");
+      if (this.orb === orb) this.orb = null;
+    });
+    this.orb = orb;
     if (!this.orb) {
       pulse.classList.remove("has-orb");
     }

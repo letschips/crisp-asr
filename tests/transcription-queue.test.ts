@@ -230,4 +230,62 @@ describe("persistent transcription queue", () => {
     expect(pruned.some((entry) => entry.id === "failed-old")).toBe(true);
     expect(pruned.some((entry) => entry.id === "queued-old")).toBe(true);
   });
+
+  it("keeps a job whose start could not be saved retryable without a reload, and runs nothing", async () => {
+    const { TranscriptionQueue } = await import(
+      "../src/transcription-queue"
+    );
+    let broken = false;
+    let runs = 0;
+    const queue = new TranscriptionQueue([], {
+      run: async () => {
+        runs += 1;
+        return {};
+      },
+      persist: async () => {
+        if (broken) throw new Error("disk full");
+      },
+      createId: () => "job-1",
+    });
+    await queue.enqueue("Audio/a.m4a");
+    await queue.enqueue("Audio/b.m4a");
+    broken = true;
+    await queue.start();
+    await queue.whenIdle();
+
+    expect(runs).toBe(0);
+    expect(queue.jobs().map((entry) => entry.status)).toEqual(["failed", "queued"]);
+
+    broken = false;
+    await expect(queue.retry("job-1")).resolves.toBe(true);
+    await queue.whenIdle();
+    expect(runs).toBe(2);
+    expect(queue.jobs().map((entry) => entry.status)).toEqual(["completed", "completed"]);
+  });
+
+  it("does not fail (and re-run) a finished job when saving completed fails", async () => {
+    const { TranscriptionQueue } = await import(
+      "../src/transcription-queue"
+    );
+    let runs = 0;
+    let saved: string[] = [];
+    const queue = new TranscriptionQueue([], {
+      run: async () => {
+        runs += 1;
+        return { outputPath: "Crisp ASR/a.md" };
+      },
+      persist: async (jobs) => {
+        if (jobs[0]?.status === "completed") throw new Error("iCloud busy");
+        saved = jobs.map((entry) => entry.status);
+      },
+      createId: () => "job-1",
+    });
+    await queue.enqueue("Audio/a.m4a");
+    await queue.start();
+    await queue.whenIdle();
+
+    expect(runs).toBe(1);
+    expect(saved).toEqual(["transcribing"]);
+    expect(queue.jobs()[0]).toMatchObject({ status: "completed", outputPath: "Crisp ASR/a.md" });
+  });
 });

@@ -124,6 +124,7 @@ export class CrispAsrLiveOrb {
   private targets: OrbTargets = targetsFor("connecting");
   private color: [number, number, number] = [0.1, 0.45, 0.95];
   private readonly reducedMotion: boolean;
+  private onLost: (() => void) | null = null;
 
   private constructor(private readonly canvas: HTMLCanvasElement) {
     this.view = canvas.ownerDocument.defaultView;
@@ -132,8 +133,11 @@ export class CrispAsrLiveOrb {
     ).matches ?? false;
   }
 
-  /** Returns null when WebGL is unavailable; the caller keeps the CSS dot. */
-  static mount(host: HTMLElement): CrispAsrLiveOrb | null {
+  /**
+   * Returns null when WebGL is unavailable; the caller keeps the CSS dot.
+   * `onLost` runs once if the GPU context is lost later; the orb has removed itself by then.
+   */
+  static mount(host: HTMLElement, onLost?: () => void): CrispAsrLiveOrb | null {
     const canvas = host.ownerDocument.createElement("canvas");
     canvas.className = "crisp-asr-live-strip__orb";
     canvas.setAttribute("aria-hidden", "true");
@@ -145,6 +149,8 @@ export class CrispAsrLiveOrb {
       return null;
     }
     host.ownerDocument.addEventListener("visibilitychange", orb.onVisibility);
+    orb.onLost = onLost ?? null;
+    canvas.addEventListener("webglcontextlost", orb.onContextLost);
     return orb;
   }
 
@@ -160,6 +166,9 @@ export class CrispAsrLiveOrb {
   }
 
   destroy(): void {
+    // loseContext() below fires webglcontextlost; that is not a GPU failure.
+    this.canvas.removeEventListener("webglcontextlost", this.onContextLost);
+    this.onLost = null;
     this.stop();
     this.canvas.ownerDocument.removeEventListener(
       "visibilitychange",
@@ -240,6 +249,12 @@ export class CrispAsrLiveOrb {
     if (this.frame) this.view?.cancelAnimationFrame(this.frame);
     this.frame = 0;
   }
+
+  private readonly onContextLost = (): void => {
+    const onLost = this.onLost;
+    this.destroy();
+    onLost?.();
+  };
 
   private readonly onVisibility = (): void => {
     if (this.canvas.ownerDocument.hidden) this.stop();

@@ -237,7 +237,8 @@ export function collectTranscribedAudioPaths<TFileLike extends { path: string }>
   return paths;
 }
 
-const MEMO_SILENCE_MESSAGE = "录音里没有识别到说话声，录音已保留。如果录的时候说了话，请检查麦克风权限（macOS：系统设置 → 隐私与安全性 → 麦克风）";
+const UNRESOLVED_DRAFT_MESSAGE = "上次的实时转写还没写入，请先在 Crisp ASR 面板中恢复或丢弃";
+const MEMO_SILENCE_MESSAGE ="录音里没有识别到说话声，录音已保留。如果录的时候说了话，请检查麦克风权限（macOS：系统设置 → 隐私与安全性 → 麦克风）";
 
 export default class CrispAsrPlugin extends Plugin {
   settings: CrispAsrSettings = { ...DEFAULT_SETTINGS };
@@ -349,8 +350,13 @@ export default class CrispAsrPlugin extends Plugin {
     this.fileQueue = new TranscriptionQueue(this.settings.fileJobs, {
       run: (job) => this.runFileJob(job),
       persist: async (jobs) => {
+        const previous = this.settings.fileJobs;
         this.settings.fileJobs = jobs;
-        if (!(await this.persistSettings())) throw new Error("转写队列保存失败，请重试");
+        if (!(await this.persistSettings())) {
+          // Otherwise a later settings save would write the rolled-back jobs to disk.
+          this.settings.fileJobs = previous;
+          throw new Error("转写队列保存失败，请重试");
+        }
       },
       createId: () => safeRandomUUID(),
       onChange: (jobs) => this.handleQueueChange(jobs),
@@ -1454,6 +1460,11 @@ export default class CrispAsrPlugin extends Plugin {
       new Notice("实时听写已经开始");
       return;
     }
+    if (this.settings.liveDraft) {
+      new Notice(`Crisp ASR：${UNRESOLVED_DRAFT_MESSAGE}`, 8_000);
+      void this.openView();
+      return;
+    }
     const apiKey = this.getApiKey();
     if (!apiKey) {
       this.showMissingKey();
@@ -1493,6 +1504,7 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   private async runLiveStart(startAbort: AbortController, memo?: MemoDictationSink): Promise<void> {
+    if (this.settings.liveDraft) throw new Error(UNRESOLVED_DRAFT_MESSAGE);
     const apiKey = this.getApiKey();
     if (!apiKey) {
       this.showMissingKey();
@@ -1765,6 +1777,8 @@ export default class CrispAsrPlugin extends Plugin {
   async startMemoDictation(sink: MemoDictationSink): Promise<void> {
     if (this.unloaded) throw new Error("Crisp ASR 已停用");
     if (this.liveSession || this.liveStarting) throw new Error("实时听写正在进行，请先结束");
+    // A new session overwrites liveDraft, so an unresolved one must be restored or discarded first.
+    if (this.settings.liveDraft) throw new Error(UNRESOLVED_DRAFT_MESSAGE);
     if (!(await this.ensureLicenseActivated())) throw new Error("请先在 Crisp ASR 设置中完成激活");
     if (!this.getApiKey()) throw new Error("请先在 Crisp ASR 设置中配置语音识别 API Key");
     await this.stopMicrophoneTest();
@@ -2318,7 +2332,13 @@ export default class CrispAsrPlugin extends Plugin {
       provider: this.settings.sttEngine === "gemini" ? "Gemini" : "Doubao",
     });
     const created = await this.app.vault.create(path, note);
-    await this.app.workspace.getLeaf(false).openFile(created);
+    // The transcript is saved at this point; failing to show it must not fail (and re-run) the job.
+    try {
+      await this.app.workspace.getLeaf(false).openFile(created);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Crisp ASR：转写已保存到 ${created.path}，但打开失败：${message}`, 8_000);
+    }
     return created;
   }
 
