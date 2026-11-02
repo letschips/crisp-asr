@@ -3,9 +3,11 @@ import {
   PluginSettingTab,
   SecretComponent,
   Setting,
+  setIcon,
   type App,
 } from "obsidian";
 import type CrispAsrPlugin from "./main";
+import { CRISP_ASR_ICON_ID } from "./icon";
 import { renderAboutCard } from "./settings-about";
 import type { AiProvider } from "./settings";
 import type { SilenceAction, SilenceDurationSeconds } from "./settings";
@@ -60,8 +62,10 @@ export class CrispAsrSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("crisp-asr-settings");
-    const intro = containerEl.createDiv({ cls: "crisp-asr-settings__intro" });
-    intro.createEl("h2", { text: "Crisp ASR" });
+    const header = containerEl.createDiv({ cls: "crisp-brand-header" });
+    setIcon(header.createDiv({ cls: "crisp-brand-logo" }), CRISP_ASR_ICON_ID);
+    header.createEl("h2", { text: "Crisp ASR" });
+    containerEl.createEl("p", { text: "开口说，落成笔记", cls: "crisp-brand-slogan" });
 
     // -----------------------------------------------------------------
     // 1. 软件授权组 (提升至最顶部)
