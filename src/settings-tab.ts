@@ -208,6 +208,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.geminiIdentifySpeakers = value;
             await this.plugin.saveSettings();
+            this.display();
           }));
       if (isSmart) {
         diarizationSetting.settingEl.addClass("is-disabled");
@@ -226,6 +227,7 @@ export class CrispAsrSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.geminiWordTimestamps = value;
             await this.plugin.saveSettings();
+            this.display();
           }));
       if (isSmart) {
         timestampSetting.settingEl.addClass("is-disabled");
@@ -233,7 +235,14 @@ export class CrispAsrSettingTab extends PluginSettingTab {
 
       new Setting(geminiGroup)
         .setName("Gemini 专属自定义词汇")
-        .setDesc("每行或逗号分隔，建议不超过 100 条；留空复用本地术语库")
+        .setDesc(
+          !isSmart && (
+            this.plugin.settings.geminiIdentifySpeakers
+            || this.plugin.settings.geminiWordTimestamps
+          )
+            ? "⚠️ 已开启区分说话人或词级时间戳，转写文件时不使用自定义词汇（Google 官方规则：两者互斥）；实时听写仍会使用"
+            : "每行或逗号分隔，建议不超过 100 条；留空复用本地术语库"
+        )
         .addTextArea((text) => text
           .setPlaceholder("Obsidian\nClaude\n产品名称\n人名")
           .setValue(this.plugin.settings.geminiCustomVocabulary)

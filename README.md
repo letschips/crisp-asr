@@ -4,6 +4,14 @@ Crisp ASR is an Obsidian plugin by **letschips** for desktop and mobile that
 connects directly to Doubao Speech Recognition or Google Gemini 3.5 Transcribe,
 and reads notes aloud with Google Gemini 3.8 TTS.
 
+## Version 0.9.10
+
+- 电脑端文件转写：豆包账号没有录音文件识别极速版时（火山 2026-11 起不再给新账号开通），自动改用流式识别 2.0，按约 6 倍速上传并开启二遍识别。比极速版慢，1 小时录音约 10 分钟。手机端仍需极速版或 Gemini。
+- 「测试豆包连接」在极速版不可用时会改测流式识别 2.0。
+- 豆包极速版被拒绝时，报错会说明原因和替代办法。
+- Gemini 文件转写：开启区分说话人或词级时间戳时不再发送自定义词汇，避免请求被 Google 拒绝。
+- 热词和上下文按火山文档的上限裁剪：实时听写合计约 100 token，文件转写上下文约 500 token。
+
 ## Version 0.9.0
 
 新增：在 Crisp Pulse 的速记输入框里长按麦克风实时听写。

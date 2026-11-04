@@ -68,6 +68,13 @@ function normalizedHeaders(
   );
 }
 
+// Volcengine took the flash (极速版) resource off its console for new accounts (docs, 2026-11-03).
+const FLASH_ACCESS_HINT = "请检查豆包 API Key；新开通的账号已无法开通录音文件识别极速版，"
+  + "电脑端会改用流式识别 2.0，手机端可在设置里改用 Gemini 转写，或联系火山引擎技术支持开通";
+
+/** The flash resource rejected the key: not enabled for this account, or a bad key. */
+export class FlashAccessError extends AsrServiceError {}
+
 export function parseFlashResponse(response: {
   status: number;
   headers: Record<string, string>;
@@ -82,6 +89,16 @@ export function parseFlashResponse(response: {
     const parts = [serviceCode || String(response.status), message];
     if (logId) {
       parts.push(`Log ID: ${logId}`);
+    }
+    if (
+      response.status === 401
+      || response.status === 403
+      || /not granted|unauthori[sz]ed|forbidden|permission/i.test(message)
+    ) {
+      parts.push(FLASH_ACCESS_HINT);
+      throw new FlashAccessError(parts.join(" · "), false, {
+        code: serviceCode || String(response.status),
+      });
     }
     throw new AsrServiceError(
       parts.join(" · "),

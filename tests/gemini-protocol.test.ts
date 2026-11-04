@@ -80,6 +80,34 @@ describe("Gemini protocol", () => {
     expect(params.custom_vocabulary.length).toBe(1_000);
   });
 
+  it.each([
+    { identifySpeakers: true, wordTimestamps: false },
+    { identifySpeakers: false, wordTimestamps: true },
+  ])("omits custom vocabulary when verbatim detail %o is on (API rejects the mix)", (detail) => {
+    const body = buildGeminiInteractionBody("uri", "audio/wav", {
+      mode: "verbatim",
+      ...detail,
+      customVocabulary: ["Obsidian"],
+    });
+    const config = (body.generation_config as {
+      transcription_config: Record<string, unknown>;
+    }).transcription_config;
+    expect(config).not.toHaveProperty("custom_vocabulary");
+  });
+
+  it("keeps custom vocabulary for plain verbatim transcription", () => {
+    const body = buildGeminiInteractionBody("uri", "audio/wav", {
+      mode: "verbatim",
+      customVocabulary: ["Obsidian"],
+    });
+    expect(body.generation_config).toEqual({
+      transcription_config: {
+        mode: { type: "verbatim" },
+        custom_vocabulary: ["Obsidian"],
+      },
+    });
+  });
+
   it("parses official word_info annotations into real timed utterances", () => {
     const response = parseGeminiTranscribeResponse({
       id: "interactions/abc123xyz",

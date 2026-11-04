@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  FlashAccessError,
   buildFlashRequest,
   parseFlashResponse,
   runConnectionProbe,
@@ -73,6 +74,37 @@ describe("Doubao flash transcription", () => {
         retryable: false,
       });
     }
+  });
+
+  it.each([
+    { status: 403, code: "", message: "requested resource not granted" },
+    { status: 401, code: "", message: "Unauthorized" },
+    { status: 200, code: "45000030", message: "resource not granted" },
+  ])("explains that the flash resource may not be enabled (%o)", ({ status, code, message }) => {
+    expect(() => parseFlashResponse({
+      status,
+      headers: {
+        ...(code ? { "x-api-status-code": code } : {}),
+        "x-api-message": message,
+      },
+      json: {},
+    })).toThrow(FlashAccessError);
+    expect(() => parseFlashResponse({
+      status,
+      headers: {
+        ...(code ? { "x-api-status-code": code } : {}),
+        "x-api-message": message,
+      },
+      json: {},
+    })).toThrow(/极速版.*流式识别 2.0.*Gemini/);
+  });
+
+  it("does not add the flash hint to unrelated failures", () => {
+    expect(() => parseFlashResponse({
+      status: 200,
+      headers: { "x-api-status-code": "45000151", "x-api-message": "audio format error" },
+      json: {},
+    })).not.toThrow(/极速版/);
   });
 
   it.each([408, 429, 500, 503])(

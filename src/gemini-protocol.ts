@@ -47,7 +47,14 @@ export function buildGeminiInteractionBody(
       (mode as Record<string, unknown>).timestamp_granularities = ["word"];
     }
   }
-  if (options?.customVocabulary && options.customVocabulary.length > 0) {
+  // The API rejects custom_vocabulary together with diarization or word timestamps.
+  const wantsWordDetail = !isSmart
+    && (options?.identifySpeakers === true || options?.wordTimestamps === true);
+  if (
+    !wantsWordDetail
+    && options?.customVocabulary
+    && options.customVocabulary.length > 0
+  ) {
     transcriptionConfig.custom_vocabulary = options.customVocabulary.slice(0, 1_000);
   }
   if (options?.languageCode) {

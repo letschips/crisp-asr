@@ -67,7 +67,8 @@ import {
   matchesAutoTranscribeScope,
   resolveProtocolAction,
 } from "./file-routing";
-import { runConnectionProbe } from "./flash-client";
+import { FlashAccessError, runConnectionProbe } from "./flash-client";
+import { transcribePcmViaStreaming } from "./streaming-file-client";
 import {
   LiveAudioRecorder,
   assertLiveRecordingSupported,
@@ -269,6 +270,8 @@ export default class CrispAsrPlugin extends Plugin {
   private readonly autoTimers = new Set<number>();
   private readonly jobStatuses = new Map<string, PersistedFileJob["status"]>();
   private fileQueue: TranscriptionQueue | null = null;
+  /** Key whose flash (极速版) access was refused this session; desktop files then use streaming 2.0. */
+  private flashDeniedKey: string | null = null;
   private liveSession: LiveSession | null = null;
   private liveStarting = false;
   private liveStartAbort: AbortController | null = null;
@@ -900,6 +903,23 @@ export default class CrispAsrPlugin extends Plugin {
         await runConnectionProbe(apiKey, transcribeFlash);
         new Notice("Crisp ASR：豆包连接正常");
       } catch (error) {
+        if (error instanceof FlashAccessError && !isMobileEnvironment()) {
+          try {
+            // 100 ms of silence through streaming 2.0, the desktop fallback for files.
+            await transcribePcmViaStreaming({
+              apiKey,
+              resourceId: this.settings.liveResourceId,
+              pcm: new Uint8Array(3_200),
+            });
+            this.flashDeniedKey = apiKey;
+            new Notice("Crisp ASR：豆包连接正常。极速版不可用，文件转写会改用流式识别 2.0", 8_000);
+            return;
+          } catch (streamError) {
+            const message = streamError instanceof Error ? streamError.message : String(streamError);
+            new Notice(`Crisp ASR 连接测试失败：${message}`, 8_000);
+            return;
+          }
+        }
         const message = error instanceof Error ? error.message : String(error);
         new Notice(`Crisp ASR 连接测试失败：${message}`, 8_000);
       }
@@ -1395,12 +1415,13 @@ export default class CrispAsrPlugin extends Plugin {
       : null;
     const target = targetValue instanceof TFile ? targetValue : undefined;
     let audio: ArrayBuffer;
+    let binary: ArrayBuffer;
     const transcodedToWav = needsTranscoding(
       source.path,
       this.settings.sttEngine,
     );
     try {
-      const binary = await this.app.vault.readBinary(source);
+      binary = await this.app.vault.readBinary(source);
       audio = transcodedToWav
         ? await decodeAudioToPcmWav(binary, window)
         : binary;
@@ -1425,10 +1446,12 @@ export default class CrispAsrPlugin extends Plugin {
           customVocabulary: customVocab.length > 0 ? customVocab : undefined,
         });
       } else {
-        result = await transcribeFlash(
+        result = await this.transcribeDoubaoFile(
           apiKey,
+          binary,
+          transcodedToWav ? audio : null,
           audio,
-          await this.buildRecognition(target, false),
+          target,
         );
       }
     } catch (error) {
@@ -1451,6 +1474,62 @@ export default class CrispAsrPlugin extends Plugin {
     this.emit();
     this.rememberProcessed(source.path);
     return { outputPath: output.path };
+  }
+
+  /**
+   * Flash (极速版) first; on desktop, an account without flash access falls back to
+   * streaming ASR 2.0, which handles whole files when pushed at a few times real speed.
+   */
+  private async transcribeDoubaoFile(
+    apiKey: string,
+    original: ArrayBuffer,
+    decodedWav: ArrayBuffer | null,
+    flashAudio: ArrayBuffer,
+    target: TFile | undefined,
+  ): Promise<FlashResponse> {
+    const desktop = !isMobileEnvironment();
+    if (!desktop || this.flashDeniedKey !== apiKey) {
+      try {
+        return await transcribeFlash(
+          apiKey,
+          flashAudio,
+          await this.buildRecognition(target, false),
+        );
+      } catch (error) {
+        if (!desktop || !(error instanceof FlashAccessError)) throw error;
+        this.flashDeniedKey = apiKey;
+        new Notice("Crisp ASR：极速版不可用，文件转写改用流式识别 2.0，速度会慢一些", 8_000);
+      }
+    }
+    let pcm: Uint8Array;
+    try {
+      const wav = decodedWav ?? await decodeAudioToPcmWav(original, window);
+      pcm = new Uint8Array(wav, 44);
+    } catch (error) {
+      throw toAsrServiceError(error, false);
+    }
+    try {
+      return await transcribePcmViaStreaming({
+        apiKey,
+        resourceId: this.settings.liveResourceId,
+        pcm,
+        recognition: await this.buildRecognition(target, true),
+      });
+    } catch (error) {
+      const failure = toAsrServiceError(error, true);
+      if (failure.code === "401" || failure.code === "403") {
+        throw new AsrServiceError(
+          `豆包 API Key 无效，或这个账号没有开通语音识别：极速版和流式识别 2.0 都拒绝了请求（HTTP ${failure.code}）`,
+          false,
+          { code: failure.code, cause: error },
+        );
+      }
+      throw new AsrServiceError(
+        `极速版不可用，改用流式识别 2.0 也失败：${failure.message}`,
+        failure.retryable,
+        { code: failure.code, cause: error },
+      );
+    }
   }
 
   async startLiveTranscription(): Promise<void> {
