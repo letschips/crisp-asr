@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { requireAsrLicense } from "../src/license-gate";
+
+// Licensed paths are exercised with the gate opened through the module, the only way to open it.
+vi.mock("../src/license-gate", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/license-gate")>();
+  return { requireAsrLicense: vi.fn(actual.requireAsrLicense) };
+});
 import { TFile } from "obsidian";
 import CrispAsrPlugin from "../src/main";
 import { DEFAULT_SETTINGS } from "../src/settings";
@@ -60,7 +67,7 @@ describe("plugin smart processing workflow", () => {
       aiApiKeySecretName: "ai-test",
       aiModel: "test-model",
     };
-    plugin.ensureLicenseActivated = async () => true;
+    vi.mocked(requireAsrLicense).mockResolvedValueOnce(true);
     plugin.uiState.smartTargetPath = file.path;
     (
       plugin as unknown as {

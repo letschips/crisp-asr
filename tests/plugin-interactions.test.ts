@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { requireAsrLicense } from "../src/license-gate";
+
+// Licensed paths are exercised with the gate opened through the module, the only way to open it.
+vi.mock("../src/license-gate", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/license-gate")>();
+  return { requireAsrLicense: vi.fn(actual.requireAsrLicense) };
+});
 
 import { TFile } from "obsidian";
 import CrispAsrPlugin from "../src/main";
@@ -278,7 +285,7 @@ describe("settings and auto-transcription safety", () => {
       liveStarting: boolean;
       buildRecognition: () => Promise<never>;
     };
-    plugin.ensureLicenseActivated = async () => true;
+    vi.mocked(requireAsrLicense).mockResolvedValueOnce(true);
     internal.buildRecognition = async () => {
       throw new Error("setup exploded");
     };

@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const clients: Array<{ options: { onPayload: (p: unknown) => void; onError: (e: Error) => void }; connected: boolean; finished: boolean; gate?: Promise<void> }> = [];
 let connectGate: Promise<void> | null = null;
 
+// Every case here runs licensed; the gate is a module function, so it is opened through the module.
+vi.mock("../src/license-gate", () => ({ requireAsrLicense: async () => true }));
 vi.mock("../src/streaming-client", () => ({
   DoubaoStreamingClient: class {
     options: never; connected = false; finished = false;
@@ -52,7 +54,6 @@ function makePlugin() {
   };
   const plugin = new CrispAsrPlugin(app as never, { id: "crisp-asr" } as never);
   Object.assign(plugin.settings, { apiKeySecretName: "asr", licenseCode: "x", saveLiveAudio: true, sttEngine: "doubao", silenceAction: "off" });
-  plugin.ensureLicenseActivated = async () => true;
   const internal = plugin as unknown as { openView: () => Promise<void>; writeLiveTranscript: () => Promise<never>; persistSettings: () => Promise<boolean>; liveStarting: boolean; liveSession: unknown };
   let opened = 0;
   internal.openView = async () => { opened++; };

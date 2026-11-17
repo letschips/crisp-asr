@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { verifyLicenseCode } from "../src/license";
+// The verifier takes WebCrypto at load, so it is imported after the local trust anchor is installed.
+let verifyLicenseCode: typeof import("../src/license").verifyLicenseCode;
 import { installLocalTrustAnchor, restoreTrustAnchor, trustedCode, untrustedCode } from "./local-license-fixture";
 
 // 密钥轮换完成后的授权测试：
@@ -11,10 +12,11 @@ const NEW_SIGNED_CODE = trustedCode();
 const OLD_SIGNED_CODE = untrustedCode();
 
 describe("license key rotation (legacy key removed)", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     // Node 测试环境补齐 window，验签使用 Node WebCrypto (Ed25519)
     (globalThis as unknown as { window: unknown }).window = globalThis;
     installLocalTrustAnchor();
+    ({ verifyLicenseCode } = await import("../src/license"));
   });
 
   afterAll(() => restoreTrustAnchor());

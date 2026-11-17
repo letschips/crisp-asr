@@ -36,7 +36,7 @@ import {
   type AiProcessMode,
   type ProcessingMetadata,
 } from "./ai-processing";
-import { verifyLicenseCode } from "./license";
+import { requireAsrLicense } from "./license-gate";
 import {
   decodeAudioToPcmWav,
   geminiUploadMimeType,
@@ -647,19 +647,6 @@ export default class CrispAsrPlugin extends Plugin {
     }
   }
 
-  async ensureLicenseActivated(): Promise<boolean> {
-    if (!this.settings.licenseCode) {
-      new Notice("🔒 Crisp ASR 未激活，请先在设置中输入授权码激活后使用。");
-      return false;
-    }
-    const check = await verifyLicenseCode(this.settings.licenseCode);
-    if (!check.valid) {
-      new Notice(`🔒 Crisp ASR 授权无效: ${check.reason || "未激活"}`);
-      return false;
-    }
-    return true;
-  }
-
   private async readAloudActiveNote(): Promise<void> {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view?.file) {
@@ -673,7 +660,7 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async startReadAloud(markdown: string): Promise<void> {
-    if (!(await this.ensureLicenseActivated())) return;
+    if (!(await requireAsrLicense(this))) return;
     const secretName = this.settings.geminiApiKeySecretName.trim();
     const apiKey = secretName
       ? this.app.secretStorage.getSecret(secretName)?.trim()
@@ -882,7 +869,7 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async testConnection(): Promise<void> {
-    if (!(await this.ensureLicenseActivated())) return;
+    if (!(await requireAsrLicense(this))) return;
     const apiKey = this.getApiKey();
     if (!apiKey) {
       this.showMissingKey();
@@ -927,7 +914,7 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async testAiConnection(): Promise<void> {
-    if (!(await this.ensureLicenseActivated())) return;
+    if (!(await requireAsrLicense(this))) return;
     const apiKey = this.getAiApiKey();
     if (!apiKey) {
       this.showMissingAiKey();
@@ -959,7 +946,7 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async startSmartProcessing(mode: AiProcessMode): Promise<void> {
-    if (!(await this.ensureLicenseActivated())) return;
+    if (!(await requireAsrLicense(this))) return;
     if (this.uiState.smartMode === "processing") {
       new Notice("Crisp ASR：已有智能处理任务正在运行");
       return;
@@ -1031,7 +1018,7 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async startCreationWorkflow(): Promise<void> {
-    if (!(await this.ensureLicenseActivated())) return;
+    if (!(await requireAsrLicense(this))) return;
     if (this.uiState.smartMode === "processing") {
       new Notice("Crisp ASR：已有智能处理任务正在运行");
       return;
@@ -1262,7 +1249,7 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async transcribeFile(file: TFile, target?: TFile): Promise<void> {
-    if (!(await this.ensureLicenseActivated())) return;
+    if (!(await requireAsrLicense(this))) return;
     const apiKey = this.getApiKey();
     if (!apiKey) {
       this.showMissingKey();
@@ -1281,7 +1268,7 @@ export default class CrispAsrPlugin extends Plugin {
   /** Manual Pulse entry: never changes the ASR output preference or opens another note. */
   async transcribeMemoAudio(file: TFile, target: { memoId: string; path: string }): Promise<PersistedFileJob> {
     if (this.unloaded || !this.fileQueue) throw new Error("Crisp ASR 尚未就绪，请重试");
-    if (!(await this.ensureLicenseActivated())) throw new Error("请先在 Crisp ASR 设置中完成激活");
+    if (!(await requireAsrLicense(this))) throw new Error("请先在 Crisp ASR 设置中完成激活");
     if (!isAudioPath(file.path) || !/^[a-zA-Z0-9-]+$/.test(target.memoId)) throw new Error("速记音频或标识无效");
     // A completed job is reused only by Pulse's receipt check; once the user removes that transcript, transcribe again.
     const previous = [...this.fileQueue.jobs()].reverse().find((job) => job.memoId === target.memoId && job.sourcePath === file.path && job.status !== "completed");
@@ -1312,7 +1299,7 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async scanUntranscribedRecordings(): Promise<void> {
-    if (!(await this.ensureLicenseActivated())) return;
+    if (!(await requireAsrLicense(this))) return;
     if (!this.getApiKey()) {
       this.showMissingKey();
       return;
@@ -1534,7 +1521,7 @@ export default class CrispAsrPlugin extends Plugin {
 
   async startLiveTranscription(): Promise<void> {
     await this.stopMicrophoneTest();
-    if (!(await this.ensureLicenseActivated())) return;
+    if (!(await requireAsrLicense(this))) return;
     if (this.liveSession || this.liveStarting) {
       new Notice("实时听写已经开始");
       return;
@@ -1858,7 +1845,7 @@ export default class CrispAsrPlugin extends Plugin {
     if (this.liveSession || this.liveStarting) throw new Error("实时听写正在进行，请先结束");
     // A new session overwrites liveDraft, so an unresolved one must be restored or discarded first.
     if (this.settings.liveDraft) throw new Error(UNRESOLVED_DRAFT_MESSAGE);
-    if (!(await this.ensureLicenseActivated())) throw new Error("请先在 Crisp ASR 设置中完成激活");
+    if (!(await requireAsrLicense(this))) throw new Error("请先在 Crisp ASR 设置中完成激活");
     if (!this.getApiKey()) throw new Error("请先在 Crisp ASR 设置中配置语音识别 API Key");
     await this.stopMicrophoneTest();
     if (this.liveSession || this.liveStarting) throw new Error("实时听写正在进行，请先结束");

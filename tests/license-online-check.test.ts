@@ -6,16 +6,18 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const { requestUrlMock } = vi.hoisted(() => ({ requestUrlMock: vi.fn() }));
 vi.mock("obsidian", () => ({ requestUrl: requestUrlMock }));
 
-import { verifyLicenseCode } from "../src/license";
+// The verifier takes WebCrypto at load, so it is imported after the local trust anchor is installed.
+let verifyLicenseCode: typeof import("../src/license").verifyLicenseCode;
 import { installLocalTrustAnchor, restoreTrustAnchor, trustedCode } from "./local-license-fixture";
 
 // 本地密钥签发的授权码，不使用任何真实授权码（本仓库公开）。
 const VALID_SIGNED_CODE = trustedCode();
 
 describe("license online check", () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     (globalThis as unknown as { window: unknown }).window = globalThis;
     installLocalTrustAnchor();
+    ({ verifyLicenseCode } = await import("../src/license"));
   });
 
   afterAll(() => restoreTrustAnchor());
