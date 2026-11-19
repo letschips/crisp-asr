@@ -60,6 +60,10 @@ import {
   transcribeGeminiFile,
   runGeminiConnectionProbe,
 } from "./gemini-file-service";
+import {
+  transcribeMimoFile,
+  runMimoConnectionProbe,
+} from "./mimo-file-service";
 import type { FlashResponse } from "./flash-client";
 import {
   buildSidecarPath,
@@ -583,7 +587,7 @@ export default class CrispAsrPlugin extends Plugin {
       this.registerEvent(this.app.vault.on("create", (file) => {
         this.handleCreatedFile(file);
       }));
-      if (this.getApiKey()) {
+      if (this.getFileApiKey()) {
         void this.fileQueue?.start();
       }
       this.refreshReadAloudTarget();
@@ -786,7 +790,7 @@ export default class CrispAsrPlugin extends Plugin {
   async saveSettings(): Promise<void> {
     this.settings = normalizeSettings(this.settings);
     await this.persistSettings();
-    if (this.getApiKey()) {
+    if (this.getFileApiKey()) {
       void this.fileQueue?.start();
     }
     this.emit();
@@ -1250,9 +1254,8 @@ export default class CrispAsrPlugin extends Plugin {
 
   async transcribeFile(file: TFile, target?: TFile): Promise<void> {
     if (!(await requireAsrLicense(this))) return;
-    const apiKey = this.getApiKey();
-    if (!apiKey) {
-      this.showMissingKey();
+    if (!this.getFileApiKey()) {
+      this.showMissingFileKey();
       return;
     }
     await this.openView();
@@ -1272,7 +1275,7 @@ export default class CrispAsrPlugin extends Plugin {
     if (!isAudioPath(file.path) || !/^[a-zA-Z0-9-]+$/.test(target.memoId)) throw new Error("速记音频或标识无效");
     // A completed job is reused only by Pulse's receipt check; once the user removes that transcript, transcribe again.
     const previous = [...this.fileQueue.jobs()].reverse().find((job) => job.memoId === target.memoId && job.sourcePath === file.path && job.status !== "completed");
-    if (!previous?.transcriptText && !this.getApiKey()) throw new Error("请先在 Crisp ASR 设置中配置语音识别 API Key");
+    if (!previous?.transcriptText && !this.getFileApiKey()) throw new Error("请先在 Crisp ASR 设置中配置语音识别 API Key");
     if (previous) {
       if (previous.status === "failed") await this.fileQueue.retry(previous.id);
       await this.fileQueue.start();
@@ -1300,8 +1303,8 @@ export default class CrispAsrPlugin extends Plugin {
 
   async scanUntranscribedRecordings(): Promise<void> {
     if (!(await requireAsrLicense(this))) return;
-    if (!this.getApiKey()) {
-      this.showMissingKey();
+    if (!this.getFileApiKey()) {
+      this.showMissingFileKey();
       return;
     }
     await this.openView();
@@ -1352,8 +1355,8 @@ export default class CrispAsrPlugin extends Plugin {
   }
 
   async retryFileJob(id: string): Promise<void> {
-    if (!this.getApiKey()) {
-      this.showMissingKey();
+    if (!this.getFileApiKey()) {
+      this.showMissingFileKey();
       return;
     }
     const queue = this.fileQueue;
@@ -1388,10 +1391,9 @@ export default class CrispAsrPlugin extends Plugin {
       return { outputPath: written.path };
     }
     if (job.memoId) await this.memoDestination().validateMemoTranscriptionTarget({ memoId: job.memoId, path: job.targetPath || "", sourcePath: job.sourcePath });
-    const apiKey = this.getApiKey();
+    const apiKey = this.getFileApiKey();
     if (!apiKey) {
-      const engine = this.settings.sttEngine === "gemini" ? "Gemini" : "豆包";
-      throw new AsrServiceError(`${engine} API Key 未配置或已失效`, false);
+      throw new AsrServiceError(`${this.fileEngineLabel()} API Key 未配置或已失效`, false);
     }
     const source = this.app.vault.getAbstractFileByPath(job.sourcePath);
     if (!(source instanceof TFile) || !isAudioPath(source.path)) {
@@ -1403,7 +1405,9 @@ export default class CrispAsrPlugin extends Plugin {
     const target = targetValue instanceof TFile ? targetValue : undefined;
     let audio: ArrayBuffer;
     let binary: ArrayBuffer;
-    const transcodedToWav = needsTranscoding(
+    const mimo = this.settings.fileSttEngine === "mimo";
+    // MiMo is cut into segments from 16 kHz PCM, so every source is decoded first.
+    const transcodedToWav = mimo || needsTranscoding(
       source.path,
       this.settings.sttEngine,
     );
@@ -1423,7 +1427,9 @@ export default class CrispAsrPlugin extends Plugin {
     }
     let result: FlashResponse;
     try {
-      if (this.settings.sttEngine === "gemini") {
+      if (mimo) {
+        result = await transcribeMimoFile(apiKey, audio);
+      } else if (this.settings.sttEngine === "gemini") {
         const mimeType = geminiUploadMimeType(source.path, transcodedToWav);
         const customVocab = this.getCustomVocabularyList();
         result = await transcribeGeminiFile(apiKey, audio, mimeType, {
@@ -2138,6 +2144,39 @@ export default class CrispAsrPlugin extends Plugin {
     return this.app.secretStorage.getSecret(secretName)?.trim() || null;
   }
 
+  /** File jobs may use MiMo while live dictation keeps the main engine. */
+  private getFileApiKey(): string | null {
+    if (this.settings.fileSttEngine !== "mimo") return this.getApiKey();
+    const secretName = this.settings.mimoApiKeySecretName.trim();
+    if (!secretName) return null;
+    return this.app.secretStorage.getSecret(secretName)?.trim() || null;
+  }
+
+  private fileEngineLabel(): string {
+    if (this.settings.fileSttEngine === "mimo") return "MiMo";
+    return this.settings.sttEngine === "gemini" ? "Gemini" : "豆包";
+  }
+
+  private showMissingFileKey(): void {
+    new Notice(`请先在 Crisp ASR 设置中选择或创建 ${this.fileEngineLabel()} API Key`, 6_000);
+  }
+
+  async testMimoConnection(): Promise<void> {
+    if (!(await requireAsrLicense(this))) return;
+    const apiKey = this.getFileApiKey();
+    if (this.settings.fileSttEngine !== "mimo" || !apiKey) {
+      this.showMissingFileKey();
+      return;
+    }
+    try {
+      await runMimoConnectionProbe(apiKey);
+      new Notice("Crisp ASR：MiMo 连接正常");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`Crisp ASR MiMo 连接测试失败：${message}`, 8_000);
+    }
+  }
+
   private getAiApiKey(): string | null {
     const secretName = this.settings.aiApiKeySecretName.trim();
     if (!secretName) {
@@ -2395,7 +2434,9 @@ export default class CrispAsrPlugin extends Plugin {
       text: result.text,
       utterances: result.utterances,
       logId: result.logId,
-      provider: this.settings.sttEngine === "gemini" ? "Gemini" : "Doubao",
+      provider: this.settings.fileSttEngine === "mimo"
+        ? "MiMo"
+        : this.settings.sttEngine === "gemini" ? "Gemini" : "Doubao",
     });
     const created = await this.app.vault.create(path, note);
     // The transcript is saved at this point; failing to show it must not fail (and re-run) the job.

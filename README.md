@@ -2,7 +2,13 @@
 
 Crisp ASR is an Obsidian plugin by **letschips** for desktop and mobile that
 connects directly to Doubao Speech Recognition or Google Gemini 3.5 Transcribe,
-and reads notes aloud with Google Gemini 3.8 TTS.
+can transcribe audio files with Xiaomi MiMo, and reads notes aloud with Google
+Gemini 3.8 TTS.
+
+## Version 0.10.0
+
+- 新增小米 MiMo 文件转写：在设置的「文件转写」里选「小米 MiMo」，填写按量付费 API Key（以 `sk-` 开头）。实时听写仍用豆包或 Gemini。
+- MiMo 不返回时间戳和说话人，转写笔记的时间轴约每分钟一段。
 
 ## Version 0.9.11
 

@@ -14,6 +14,8 @@ import {
 import { normalizeDeepSeekModel } from "./ai-provider";
 
 export type SttEngine = "doubao" | "gemini";
+/** File transcription can use its own service; live dictation always follows sttEngine. */
+export type FileSttEngine = "same" | "mimo";
 export type GeminiMode = "smart" | "verbatim";
 
 export type AiProvider =
@@ -59,6 +61,8 @@ export interface PersistedFileJob {
 
 export interface CrispAsrSettings {
   sttEngine: SttEngine;
+  fileSttEngine: FileSttEngine;
+  mimoApiKeySecretName: string;
   apiKeySecretName: string;
   geminiApiKeySecretName: string;
   geminiMode: GeminiMode;
@@ -102,6 +106,8 @@ export interface CrispAsrSettings {
 
 export const DEFAULT_SETTINGS: CrispAsrSettings = {
   sttEngine: "doubao",
+  fileSttEngine: "same",
+  mimoApiKeySecretName: "",
   apiKeySecretName: "",
   geminiApiKeySecretName: "",
   geminiMode: "smart",
@@ -262,6 +268,8 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
   const storedAiModel = cleanText(candidate.aiModel);
   return {
     sttEngine: candidate.sttEngine === "gemini" ? "gemini" : "doubao",
+    fileSttEngine: candidate.fileSttEngine === "mimo" ? "mimo" : "same",
+    mimoApiKeySecretName: cleanText(candidate.mimoApiKeySecretName),
     apiKeySecretName: typeof candidate.apiKeySecretName === "string"
       ? candidate.apiKeySecretName
       : DEFAULT_SETTINGS.apiKeySecretName,

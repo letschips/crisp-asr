@@ -152,6 +152,42 @@ export class CrispAsrSettingTab extends PluginSettingTab {
           this.display();
         }));
 
+    new Setting(engineGroup)
+      .setName("文件转写")
+      .addDropdown((dropdown) => dropdown
+        .addOption("same", "跟随当前引擎")
+        .addOption("mimo", "小米 MiMo（仅文件）")
+        .setValue(this.plugin.settings.fileSttEngine)
+        .onChange(async (value) => {
+          this.plugin.settings.fileSttEngine = value === "mimo" ? "mimo" : "same";
+          await this.plugin.saveSettings();
+          this.display();
+        }));
+
+    if (this.plugin.settings.fileSttEngine === "mimo") {
+      lockable(new Setting(engineGroup).setName("MiMo API Key"), "")
+        .addComponent((container) =>
+          new SecretComponent(this.app, container)
+            .setValue(this.plugin.settings.mimoApiKeySecretName)
+            .onChange(async (value) => {
+              if (!isActivated) {
+                const check = await verifyLicenseCode(this.plugin.settings.licenseCode);
+                if (!check.valid) {
+                  new Notice("🔒 请先在上方【软件授权】中激活 Crisp ASR 软件！");
+                  return;
+                }
+              }
+              this.plugin.settings.mimoApiKeySecretName = value;
+              await this.plugin.saveSettings();
+            })
+        )
+        .addButton((button) => button
+          .setButtonText("测试")
+          .onClick(async () => {
+            await this.plugin.testMimoConnection();
+          }));
+    }
+
     if (this.plugin.settings.sttEngine === "gemini") {
       // -----------------------------------------------------------------
       // 3. Gemini 3.5 Transcribe 连接与配置

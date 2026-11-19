@@ -5,6 +5,15 @@ import {
 } from "../src/settings";
 
 describe("settings normalization", () => {
+  it("keeps the MiMo file engine separate from live dictation", () => {
+    expect(DEFAULT_SETTINGS.fileSttEngine).toBe("same");
+    const mimo = normalizeSettings({ sttEngine: "gemini", fileSttEngine: "mimo", mimoApiKeySecretName: " mimo " });
+    expect(mimo.sttEngine).toBe("gemini");
+    expect(mimo.fileSttEngine).toBe("mimo");
+    expect(mimo.mimoApiKeySecretName).toBe("mimo");
+    expect(normalizeSettings({ fileSttEngine: "whisper" }).fileSttEngine).toBe("same");
+  });
+
   it("uses safe first-run defaults without storing a secret value", () => {
     expect(normalizeSettings(undefined)).toEqual(DEFAULT_SETTINGS);
     expect(DEFAULT_SETTINGS.sttEngine).toBe("doubao");
