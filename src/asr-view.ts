@@ -320,6 +320,7 @@ export class CrispAsrView extends ItemView {
     identity.className = "crisp-asr-identity";
     const mark = document.createElement("span");
     mark.className = `crisp-asr-mark is-${state.mode}`;
+    mark.classList.toggle("is-transcribing", state.jobs.some(job => job.status === "transcribing"));
     mark.innerHTML = ICON_BARS_SCALE_MIDDLE_SVG;
     const heading = document.createElement("div");
     const title = document.createElement("h2");

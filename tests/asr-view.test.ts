@@ -92,6 +92,34 @@ describe("Crisp ASR view controls", () => {
     )?.textContent).toContain("测试麦克风");
   });
 
+  it("uses a static SVG and marks the panel only while a file is transcribing", async () => {
+    let update = () => {};
+    const instance = plugin({
+      subscribe: (listener: () => void) => {
+        update = listener;
+        return () => {};
+      },
+    });
+    const view = viewFor(instance);
+    const state = instance.uiState as { jobs: unknown[] };
+    const mark = () => view.contentEl.querySelector(".crisp-asr-mark");
+
+    await view.onOpen();
+
+    expect(mark()?.querySelectorAll("rect")).toHaveLength(5);
+    expect(mark()?.querySelector("animate")).toBeNull();
+    expect(mark()?.classList.contains("is-transcribing")).toBe(false);
+
+    const job = { id: "sample", sourcePath: "sample.wav", status: "transcribing" };
+    state.jobs = [job];
+    update();
+    expect(mark()?.classList.contains("is-transcribing")).toBe(true);
+
+    state.jobs = [{ ...job, status: "completed" }];
+    update();
+    expect(mark()?.classList.contains("is-transcribing")).toBe(false);
+  });
+
   it("shows the active microphone while testing and offers stop", async () => {
     const instance = plugin();
     Object.assign(instance.uiState as object, {

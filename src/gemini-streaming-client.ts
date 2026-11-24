@@ -6,6 +6,7 @@ import {
   rawDataToString,
 } from "./platform-websocket";
 import { AsrServiceError } from "./service-error";
+import { arrayBufferToBase64 } from "./platform-crypto";
 
 export interface GeminiStreamingClientOptions {
   apiKey: string;
@@ -308,7 +309,7 @@ export class GeminiStreamingClient {
         realtimeInput: {
           audio: {
             mimeType: "audio/pcm;rate=16000",
-            data: Buffer.from(chunk).toString("base64"),
+            data: arrayBufferToBase64(new Uint8Array(chunk).buffer),
           },
         },
       };

@@ -89,6 +89,27 @@ describe("GeminiStreamingClient", () => {
     });
   });
 
+  it("sends only the intended audio bytes without Node Buffer", () => {
+    const client = createClient();
+    const send = vi.fn();
+    const internal = client as unknown as {
+      socket: { readyState: number; send: (value: string) => void; close: () => void };
+      isSetupComplete: boolean;
+    };
+    internal.socket = { readyState: WebSocket.OPEN, send, close: vi.fn() };
+    internal.isSetupComplete = true;
+    const audio = new Uint8Array([99, 1, 2, 3, 4, 88]).subarray(1, 5);
+
+    vi.stubGlobal("Buffer", undefined);
+    try {
+      client.sendAudio(audio);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(JSON.parse(send.mock.calls[0][0] as string).realtimeInput.audio.data).toBe("AQIDBA==");
+  });
+
   it("splits 200 ms mixer packets into at most 100 ms Gemini chunks", () => {
     const client = createClient();
     const send = vi.fn();
