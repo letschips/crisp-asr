@@ -37,6 +37,7 @@ import {
   type ProcessingMetadata,
 } from "./ai-processing";
 import { requireAsrLicense } from "./license-gate";
+import { inheritSiblingLicense, verifyLicenseCode } from "./license";
 import {
   decodeAudioToPcmWav,
   geminiUploadMimeType,
@@ -592,6 +593,7 @@ export default class CrispAsrPlugin extends Plugin {
       }
       this.refreshReadAloudTarget();
       void this.refreshSmartTarget();
+      void this.inheritSiblingLicenseOnce();
     });
     this.updateStatusBar();
     this.notifyMemoViews();
@@ -785,6 +787,24 @@ export default class CrispAsrPlugin extends Plugin {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * Once after layout: when the saved code is empty or no longer verifies, take the first code a
+   * sibling Crisp plugin holds that passes the online check. Access is still decided by
+   * requireAsrLicense, which verifies the saved code on every use.
+   */
+  private async inheritSiblingLicenseOnce(): Promise<void> {
+    const own = this.settings.licenseCode;
+    if (own && (await verifyLicenseCode(own)).valid) return;
+    await inheritSiblingLicense(this.app, {
+      currentCode: () => this.settings.licenseCode,
+      aborted: () => this.unloaded,
+      accept: async (code) => {
+        this.settings.licenseCode = code;
+        await this.saveSettings();
+      },
+    });
   }
 
   async saveSettings(): Promise<void> {

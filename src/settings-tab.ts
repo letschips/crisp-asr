@@ -11,7 +11,7 @@ import { CRISP_ASR_ICON_ID } from "./icon";
 import { renderAboutCard } from "./settings-about";
 import type { AiProvider } from "./settings";
 import type { SilenceAction, SilenceDurationSeconds } from "./settings";
-import { verifyLicenseCode } from "./license";
+import { normalizeLicenseCode, verifyLicenseCode } from "./license";
 import { DEEPSEEK_MODELS, DEFAULT_DEEPSEEK_MODEL } from "./ai-provider";
 import shortcutQrCode from "./assets/shortcut-qr.png";
 import { DICTATION_PROFILES, type DictationProfileId } from "./dictation-profile";
@@ -95,14 +95,19 @@ export class CrispAsrSettingTab extends PluginSettingTab {
         .setPlaceholder("粘贴授权码字符串...")
         .setValue(this.plugin.settings.licenseCode)
         .onChange(async (value) => {
-          this.plugin.settings.licenseCode = value.trim();
+          this.plugin.settings.licenseCode = normalizeLicenseCode(value);
           await this.plugin.saveSettings();
         }))
       .addButton((button) => button
         .setButtonText("激活 / 重新验证")
         .setCta()
         .onClick(async () => {
-          const result = await verifyLicenseCode(this.plugin.settings.licenseCode);
+          const code = normalizeLicenseCode(this.plugin.settings.licenseCode);
+          if (code !== this.plugin.settings.licenseCode) {
+            this.plugin.settings.licenseCode = code;
+            await this.plugin.saveSettings();
+          }
+          const result = await verifyLicenseCode(code);
           if (result.valid && result.payload) {
             new Notice(`🎉 激活成功！欢迎使用，${result.payload.userName}`);
             this.display();

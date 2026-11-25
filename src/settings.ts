@@ -12,6 +12,7 @@ import {
   type GeminiTtsModel,
 } from "./gemini-tts";
 import { normalizeDeepSeekModel } from "./ai-provider";
+import { normalizeLicenseCode } from "./license";
 
 export type SttEngine = "doubao" | "gemini";
 /** File transcription can use its own service; live dictation always follows sttEngine. */
@@ -360,6 +361,6 @@ export function normalizeSettings(value: unknown): CrispAsrSettings {
     useActiveNoteContext: candidate.useActiveNoteContext === true,
     identifySpeakers: candidate.identifySpeakers === true,
     fileJobs: normalizeFileJobs(candidate.fileJobs),
-    licenseCode: cleanText(candidate.licenseCode),
+    licenseCode: normalizeLicenseCode(candidate.licenseCode),
   };
 }
