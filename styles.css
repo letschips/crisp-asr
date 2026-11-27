@@ -489,14 +489,33 @@
 .crisp-asr-smart-actions {
   display: grid;
   padding: 0 10px 11px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
 .crisp-asr-smart-actions .crisp-asr-button {
   min-width: 0;
-  padding: 0 7px;
-  font-size: 10px;
+  padding: 0 10px;
+}
+
+/* 侧栏拉窄时先收起图标，留位置给文字 */
+.crisp-asr-smart-actions {
+  container-type: inline-size;
+}
+
+@container (max-width: 210px) {
+  .crisp-asr-smart-actions .crisp-asr-button__icon {
+    display: none;
+  }
+}
+
+/* 面板再窄也只截断文字，不让按钮撑破 */
+.crisp-asr-smart-actions .crisp-asr-button > span:last-child,
+.crisp-asr-read-aloud-actions .crisp-asr-button > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .crisp-asr-smart-actions .crisp-asr-button__icon,
@@ -515,8 +534,7 @@
 
 .crisp-asr-read-aloud-actions .crisp-asr-button {
   min-width: 0;
-  padding: 0 7px;
-  font-size: 10px;
+  padding: 0 10px;
 }
 
 .crisp-asr-read-aloud-actions .crisp-asr-button__icon,
