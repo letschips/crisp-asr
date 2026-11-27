@@ -1254,6 +1254,12 @@ body.is-translucent:not(.is-popout-window):not(.is-popout-modal) .crisp-asr-view
   background-color: var(--crisp-asr-glass-hover) !important;
 }
 
+/* Windows/Linux draw the option popup from CSS; over the glass fill above it turns white in dark mode. */
+.crisp-asr-view select.dropdown option {
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+}
+
 body.is-translucent:not(.is-popout-window):not(.is-popout-modal) .crisp-asr-view .crisp-asr-button:not(:disabled):hover {
   transform: none;
   filter: none;
