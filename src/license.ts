@@ -257,7 +257,7 @@ interface SiblingScanApp {
       read(path: string): Promise<string>;
     };
   };
-  plugins?: { plugins?: Record<string, { settings?: Record<string, unknown> } | undefined> };
+  plugins?: { plugins?: Record<string, { settings?: Record<string, unknown>; options?: Record<string, unknown>; licenseKey?: unknown } | undefined> };
 }
 
 /**
@@ -281,9 +281,11 @@ export async function discoverVaultCrispLicenses(
   };
   for (const id of CRISP_SIBLING_PLUGIN_IDS) {
     if (id === targetPluginId) continue;
-    const settings = host.plugins?.plugins?.[id]?.settings;
-    add(settings?.licenseCode);
-    add(settings?.licenseKey);
+    const sibling = host.plugins?.plugins?.[id];
+    add(sibling?.settings?.licenseCode);
+    add(sibling?.settings?.licenseKey);
+    add(sibling?.options?.licenseCode);
+    add(sibling?.licenseKey);
   }
   const adapter = host.vault?.adapter;
   const configDir = host.vault?.configDir;
@@ -295,6 +297,9 @@ export async function discoverVaultCrispLicenses(
         if (!(await adapter.exists(path))) continue;
         const data = JSON.parse(await adapter.read(path)) as Record<string, unknown> | null;
         add(data?.licenseCode || data?.licenseKey || data?.license);
+        // Crisp Pulse keeps its settings nested under `settings`.
+        const nested = data?.settings as Record<string, unknown> | undefined;
+        add(nested?.licenseCode || nested?.licenseKey);
       } catch {
         // A missing or unreadable sibling file is simply skipped.
       }

@@ -119,6 +119,17 @@ describe("license paste normalization and sibling inheritance", () => {
     expect(plugin.settings.licenseCode).toBe(sibling);
   });
 
+  // Crisp Pulse keeps its code under `settings`; Pets and Days keep theirs under `options`.
+  it("reads Pulse's nested settings on disk and the options of a loaded sibling", async () => {
+    const a = trustedCode(["all"], { licenseId: "PULSE" });
+    const b = trustedCode(["all"], { licenseId: "TEST-B" });
+    const loaded: Record<string, unknown> = {};
+    const app = fakeApp({ ".cfg/plugins/crisp-pulse/data.json": JSON.stringify({ settings: { licenseCode: a } }) }, loaded);
+    expect([...(await api.discoverVaultCrispLicenses(app, "crisp-asr"))]).toEqual([a]);
+    loaded["crisp-focus"] = { options: { licenseCode: b } };
+    expect([...(await api.discoverVaultCrispLicenses(app, "crisp-asr"))]).toEqual([b, a]);
+  });
+
   it("does not persist a sibling code the server rejects", async () => {
     requestUrlMock.mockReset();
     requestUrlMock.mockImplementation(async () => ({ status: 200, json: { valid: false, reason: "revoked" } }));
